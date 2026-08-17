@@ -347,10 +347,6 @@ function handleTreeSelect(keys: Array<string | number>): void {
   }
 }
 
-function isLeafNode(o: { isLeaf?: boolean }): boolean {
-  return Boolean(o.isLeaf)
-}
-
 function onExpandedKeys(keys: Array<string | number>): void {
   expandedKeys.value = keys.map((k) => String(k))
 }
@@ -395,7 +391,7 @@ function onExpandedKeys(keys: Array<string | number>): void {
         :data="treeOptions"
         :expanded-keys="expandedKeys"
         :default-expand-all="false"
-        :selectable="isLeafNode"
+        :selectable="true"
         :show-line="true"
         :on-update:expanded-keys="onExpandedKeys"
         :on-update:selected-keys="handleTreeSelect"

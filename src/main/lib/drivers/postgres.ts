@@ -17,6 +17,7 @@ export class PostgresDriver implements DBDriver {
       user: this.cfg.username,
       password: this.cfg.password,
       database: database || this.cfg.database || 'postgres',
+      connectionTimeoutMillis: 5000,
       ssl: this.cfg.useSsl ? { rejectUnauthorized: false } : undefined
     })
   }

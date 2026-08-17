@@ -17,7 +17,7 @@ export class MysqlDriver implements DBDriver {
       user: this.cfg.username,
       password: this.cfg.password,
       database: this.cfg.database,
-      connectTimeout: 10000
+      connectTimeout: 5000
     })
   }
 

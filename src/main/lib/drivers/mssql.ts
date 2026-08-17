@@ -22,7 +22,7 @@ export class MssqlDriver implements DBDriver {
         encrypt: Boolean(this.cfg.useSsl),
         trustServerCertificate: Boolean(this.cfg.useSsl)
       },
-      connectionTimeout: 10000
+      connectionTimeout: 5000
     })
   }
 

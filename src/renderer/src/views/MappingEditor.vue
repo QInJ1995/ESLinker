@@ -943,8 +943,14 @@ const columns = computed(() => [
         </div>
       </n-card>
 
-      <n-card v-if="mode === 'table' && !props.tableContext && !meta" class="panel-card">
-        <n-empty description="请到「数据源」点击某张表的「表结构」，或使用 DDL 离线模式">
+      <n-card v-if="mode === 'table' && !meta" class="panel-card">
+        <n-empty
+          :description="
+            props.tableContext
+              ? '表结构加载失败或未完成，请到「数据源」重新点击某张表的「表结构」'
+              : '请到「数据源」点击某张表的「表结构」，或使用 DDL 离线模式'
+          "
+        >
           <template #extra>
             <n-button size="small" @click="switchDdlMode">去 DDL 离线生成</n-button>
           </template>
