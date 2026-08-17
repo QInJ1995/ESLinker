@@ -1,11 +1,14 @@
+import { computed } from 'vue'
 import { createDiscreteApi } from 'naive-ui'
 import { naiveTheme } from './theme'
-import type { Ref } from 'vue'
 
 export const { message, dialog, notification } = createDiscreteApi(
   ['message', 'dialog', 'notification'],
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  { configProviderProps: naiveTheme as unknown as Ref<any> }
+  {
+    configProviderProps: computed(() => ({
+      theme: naiveTheme.value
+    }))
+  }
 )
 
 export function ok(text: string): void {
