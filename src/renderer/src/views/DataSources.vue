@@ -379,25 +379,26 @@ function onExpandedKeys(keys: Array<string | number>): void {
       <n-empty v-else description="暂无数据库数据源，点击右上角新增" style="padding: 26px 0" />
     </n-card>
 
-    <n-card v-if="tree" class="panel-card">
-      <template #header>
-        <div class="card-hd">
-          <span>表结构 · {{ tree.cfg.name }}</span>
-          <n-spin size="small" :show="treeLoading" />
-        </div>
-      </template>
-      <n-tree
-        block-line
-        :data="treeOptions"
-        :expanded-keys="expandedKeys"
-        :default-expand-all="false"
-        :selectable="true"
-        :show-line="true"
-        :on-update:expanded-keys="onExpandedKeys"
-        :on-update:selected-keys="handleTreeSelect"
-      />
-      <div v-if="tree.databases.length === 0" class="tree-tip">（未获取到数据库清单）</div>
-    </n-card>
+    <n-spin size="small" :show="treeLoading">
+      <n-card v-if="tree" class="panel-card">
+        <template #header>
+          <div class="card-hd">
+            <span>表结构 · {{ tree.cfg.name }}</span>
+          </div>
+        </template>
+        <n-tree
+          block-line
+          :data="treeOptions"
+          :expanded-keys="expandedKeys"
+          :default-expand-all="false"
+          :selectable="true"
+          :show-line="true"
+          :on-update:expanded-keys="onExpandedKeys"
+          :on-update:selected-keys="handleTreeSelect"
+        />
+        <div v-if="tree.databases.length === 0" class="tree-tip">（未获取到数据库清单）</div>
+      </n-card>
+    </n-spin>
 
     <n-card class="panel-card">
       <template #header>
