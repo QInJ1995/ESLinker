@@ -72,7 +72,7 @@ function openTable(ctx: { cfg: DbConfig; database: string; table: string }): voi
               @update:value="setTheme($event ? 'dark' : 'light')"
             />
           </div>
-          <div class="ver">v1.0.0 · 纯客户端</div>
+          <div class="ver">v1.0.0</div>
         </div>
       </n-layout-sider>
       <n-layout :native-scrollbar="false" style="padding: 0 0 0 0">
