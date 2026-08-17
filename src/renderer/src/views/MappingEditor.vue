@@ -138,9 +138,14 @@ async function schedulePreview(): Promise<void> {
 async function buildDoc(): Promise<void> {
   if (fields.value.length === 0) return
   try {
-    doc.value = (await window.api.mapping.document(serialize(fields.value), serialize(settings))) as MappingDocument
+    doc.value = (await window.api.mapping.document(
+      serialize(fields.value),
+      serialize(settings)
+    )) as MappingDocument
     previewText.value = JSON.stringify(doc.value, null, 2)
-    issues.value = (await window.api.mapping.validate(serialize(fields.value))) as typeof issues.value
+    issues.value = (await window.api.mapping.validate(
+      serialize(fields.value)
+    )) as typeof issues.value
   } catch (e) {
     emit('snack', String((e as Error).message), 'error')
   }
@@ -222,7 +227,11 @@ async function createIndex(): Promise<void> {
 async function updateMapping(): Promise<void> {
   if (!esCfg.value || !indexName.value || !doc.value) return
   try {
-    await window.api.es.update(serialize(esCfg.value), indexName.value, serialize(doc.value.mappings.properties))
+    await window.api.es.update(
+      serialize(esCfg.value),
+      indexName.value,
+      serialize(doc.value.mappings.properties)
+    )
     emit('snack', 'Mapping 已推送更新', 'success')
   } catch (e) {
     emit('snack', `更新失败：${(e as Error).message}`, 'error')
@@ -291,7 +300,21 @@ async function parseDdl(): Promise<void> {
 }
 
 function switchTableMode(): void {
+  if (mode.value === 'table') return
   mode.value = 'table'
+  const ctx = props.tableContext
+  if (ctx) {
+    void loadStructure(ctx.cfg, ctx.database, ctx.table)
+  } else {
+    meta.value = null
+  }
+}
+
+function switchDdlMode(): void {
+  if (mode.value === 'ddl') return
+  mode.value = 'ddl'
+  meta.value = null
+  parseInfo.value = ''
 }
 
 function fieldTypeChanged(f: MappingField): void {
@@ -313,12 +336,14 @@ function short(df: string): string {
       <div class="head-tools">
         <div v-if="meta && mode === 'table'" class="meta-chip">
           表：{{ meta.database }}.{{ meta.table }}
-          <span class="muted">· {{ meta.columns.length }} 列 · 主键 {{ meta.primaryKey || '无' }}</span>
+          <span class="muted">
+            · {{ meta.columns.length }} 列 · 主键 {{ meta.primaryKey || '无' }}
+          </span>
         </div>
         <button class="btn ghost" :class="{ active: mode === 'table' }" @click="switchTableMode">
           数据库表
         </button>
-        <button class="btn ghost" :class="{ active: mode === 'ddl' }" @click="mode = 'ddl'">
+        <button class="btn ghost" :class="{ active: mode === 'ddl' }" @click="switchDdlMode">
           DDL 离线
         </button>
       </div>
@@ -329,8 +354,12 @@ function short(df: string): string {
       <div class="panel-head">
         <h2>粘贴 CREATE TABLE，离线生成 Mapping</h2>
       </div>
-      <textarea v-model="ddlText" class="ddl-text"
-        placeholder="CREATE TABLE `user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64) COMMENT '姓名',\n  ...\n) ENGINE=InnoDB COMMENT='用户表';"></textarea>
+      <textarea
+        v-model="ddlText"
+        class="ddl-text"
+        placeholder="CREATE TABLE `user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64) COMMENT '姓名',\n  ...\n) ENGINE=InnoDB COMMENT='用户表';"
+      >
+      </textarea>
       <div class="row-end">
         <span class="muted">{{ parseInfo }}</span>
         <button class="btn primary" @click="parseDdl">解析并生成</button>
@@ -340,7 +369,7 @@ function short(df: string): string {
     <section v-if="mode === 'table' && !props.tableContext && !meta" class="panel ddl-panel">
       <div class="empty2">
         <p>请到「数据源」中点击某个表的「表结构」，或使用 DDL 离线模式。</p>
-        <button class="btn ghost" @click="mode = 'ddl'">去 DDL 离线生成</button>
+        <button class="btn ghost" @click="switchDdlMode">去 DDL 离线生成</button>
       </div>
     </section>
 
@@ -377,11 +406,15 @@ function short(df: string): string {
             <tbody>
               <tr v-for="f in fields" :key="f.column">
                 <td class="col-col">
-                  <span v-if="meta.columns.find((c) => c.name === f.column)?.primaryKey" class="pk-badge">PK</span>
+                  <span
+                    v-if="meta.columns.find((c) => c.name === f.column)?.primaryKey"
+                    class="pk-badge"
+                    >PK</span
+                  >
                   <b>{{ f.column }}</b>
                 </td>
                 <td class="mono raw">
-                  {{meta.columns.find((c) => c.name === f.column)?.rawType || '-'}}
+                  {{ meta.columns.find((c) => c.name === f.column)?.rawType || '-' }}
                 </td>
                 <td>
                   <select v-model="f.esType" class="es-type" @change="fieldTypeChanged(f)">
@@ -421,8 +454,12 @@ function short(df: string): string {
           </table>
         </div>
         <div v-if="issues.length" class="issues">
-          <div v-for="(it, idx) in issues" :key="idx" class="issue"
-            :class="it.level === 'error' ? 'issue-err' : 'issue-warn'">
+          <div
+            v-for="(it, idx) in issues"
+            :key="idx"
+            class="issue"
+            :class="it.level === 'error' ? 'issue-err' : 'issue-warn'"
+          >
             <b>{{ it.level === 'error' ? '✕' : '⚠' }}</b>
             <span class="mono">{{ it.field }}</span> · {{ it.message }}
           </div>
@@ -448,7 +485,9 @@ function short(df: string): string {
         </div>
         <div class="muted">防覆盖保护：创建前自动校验，索引已存在时需二次确认。</div>
         <div class="es-badges">
-          <span v-if="esCfg" class="badge badge-es">目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }})</span>
+          <span v-if="esCfg" class="badge badge-es"
+            >目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }})</span
+          >
           <span v-if="indexName" :class="indexExists ? 'badge badge-ok' : 'badge badge-muted'">
             {{ indexExists ? '索引已存在' : '索引不存在' }}
           </span>
@@ -464,7 +503,9 @@ function short(df: string): string {
         <div v-else class="tpl-list">
           <div v-for="t in templates" :key="t.id" class="tpl-item">
             <span class="tpl-name">{{ t.name }}</span>
-            <span class="muted">{{ t.fields.length }} 字段 · {{ new Date(t.createdAt).toLocaleDateString() }}</span>
+            <span class="muted"
+              >{{ t.fields.length }} 字段 · {{ new Date(t.createdAt).toLocaleDateString() }}</span
+            >
             <span class="tpl-ops">
               <button class="btn ghost" @click="applyTemplate(t.id)">应用</button>
               <button class="btn danger-ghost" @click="removeTemplate(t.id)">删除</button>
@@ -564,7 +605,7 @@ function short(df: string): string {
   color: var(--es-text);
 }
 
-.btn+.btn {
+.btn + .btn {
   margin-left: 6px;
 }
 

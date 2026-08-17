@@ -312,10 +312,10 @@ function esName(id: string): string {
               <b>{{ t.name }}</b>
               <span :class="statusBadgeClass(t.status)">{{
                 t.status === 'paused' ? '已暂停' : t.status
-                }}</span>
+              }}</span>
               <span class="badge badge-mode">{{
                 t.mode === 'full' ? '全量' : t.mode === 'incremental' ? '增量' : '全量+增量'
-                }}</span>
+              }}</span>
             </div>
             <div class="task-route mono">
               {{ srcName(t.dbSourceId) }} → {{ t.database }}.{{ t.table }}
@@ -323,17 +323,33 @@ function esName(id: string): string {
               {{ esName(t.esSourceId) }} / {{ t.esIndex }}
             </div>
             <div class="task-stats">
-              <span>已同步 <b>{{ fmt(t.stats.processed) }}</b></span>
-              <span>总数 <b>{{ fmt(t.stats.total) }}</b></span>
+              <span
+                >已同步 <b>{{ fmt(t.stats.processed) }}</b></span
+              >
+              <span
+                >总数 <b>{{ fmt(t.stats.total) }}</b></span
+              >
               <span class="bar">
-                <i :style="{ width: pct(t) === '进行中' ? '50%' : pct(t) === '—' ? '0%' : pct(t) }"></i>
+                <i
+                  :style="{ width: pct(t) === '进行中' ? '50%' : pct(t) === '—' ? '0%' : pct(t) }"
+                ></i>
               </span>
-              <span>进度 <b>{{ pct(t) }}</b></span>
+              <span
+                >进度 <b>{{ pct(t) }}</b></span
+              >
               <span class="sep">｜</span>
-              <span>插入 <b class="up">{{ fmt(t.stats.inserted) }}</b></span>
-              <span>更新 <b class="up">{{ fmt(t.stats.updated) }}</b></span>
-              <span>删除 <b class="del">{{ fmt(t.stats.deleted) }}</b></span>
-              <span>失败 <b :class="{ del: t.stats.failed > 0 }">{{ fmt(t.stats.failed) }}</b></span>
+              <span
+                >插入 <b class="up">{{ fmt(t.stats.inserted) }}</b></span
+              >
+              <span
+                >更新 <b class="up">{{ fmt(t.stats.updated) }}</b></span
+              >
+              <span
+                >删除 <b class="del">{{ fmt(t.stats.deleted) }}</b></span
+              >
+              <span
+                >失败 <b :class="{ del: t.stats.failed > 0 }">{{ fmt(t.stats.failed) }}</b></span
+              >
             </div>
             <div v-if="t.stats.lastError" class="task-error">⚠ {{ t.stats.lastError }}</div>
           </div>
@@ -442,7 +458,7 @@ select {
   color: var(--es-text);
 }
 
-.btn+.btn {
+.btn + .btn {
   margin-left: 6px;
 }
 

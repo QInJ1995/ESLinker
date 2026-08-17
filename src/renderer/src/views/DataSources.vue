@@ -179,6 +179,10 @@ async function loadTree(cfg: DbConfig): Promise<void> {
     }
     tree.value = { cfg, databases: res.databases, tables }
     expanded.clear()
+    // 如果配置了默认数据库，自动展开它
+    if (cfg.database && res.databases.includes(cfg.database)) {
+      expanded.add(cfg.database)
+    }
   } catch (e) {
     console.error('loadTree', e)
     emit('snack', `加载表结构失败：${(e as Error).message}`, 'error')
@@ -258,8 +262,13 @@ function clickTable(database: string, table: string): void {
             <div v-if="(tree.tables.get(db) || []).length === 0" class="muted tree-leaf">
               （无表）
             </div>
-            <div v-for="t in tree.tables.get(db) || []" :key="t" class="tree-leaf clickable" title="打开 Mapping 编辑器"
-              @click="clickTable(db, t)">
+            <div
+              v-for="t in tree.tables.get(db) || []"
+              :key="t"
+              class="tree-leaf clickable"
+              title="打开 Mapping 编辑器"
+              @click="clickTable(db, t)"
+            >
               ▦ {{ t }}
             </div>
           </div>
@@ -337,8 +346,12 @@ function clickTable(database: string, table: string): void {
               </label>
               <label>
                 密码
-                <input v-model="dbForm.password" type="password" autocomplete="new-password"
-                  :placeholder="modal.editing ? '留空表示保持不变' : ''" />
+                <input
+                  v-model="dbForm.password"
+                  type="password"
+                  autocomplete="new-password"
+                  :placeholder="modal.editing ? '留空表示保持不变' : ''"
+                />
               </label>
               <label>
                 默认数据库（可选）
@@ -379,8 +392,12 @@ function clickTable(database: string, table: string): void {
               </label>
               <label>
                 密码
-                <input v-model="esForm.password" type="password" autocomplete="new-password"
-                  :placeholder="modal.editing ? '留空表示保持不变' : ''" />
+                <input
+                  v-model="esForm.password"
+                  type="password"
+                  autocomplete="new-password"
+                  :placeholder="modal.editing ? '留空表示保持不变' : ''"
+                />
               </label>
               <label>
                 API Key（可选，优先于账号密码）
@@ -500,7 +517,7 @@ function clickTable(database: string, table: string): void {
   color: var(--es-text);
 }
 
-.btn+.btn {
+.btn + .btn {
   margin-left: 6px;
 }
 
