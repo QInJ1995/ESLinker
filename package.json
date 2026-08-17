@@ -1,9 +1,9 @@
 {
-  "name": "electron-app",
+  "name": "eslinker",
   "version": "1.0.0",
-  "description": "An Electron application with Vue and TypeScript",
+  "description": "ESLinker - 数据库表结构可视化映射 + 全量/增量数据同步桌面工具（Electron 纯客户端）",
   "main": "./out/main/index.js",
-  "author": "example.com",
+  "author": "ESLinker",
   "homepage": "https://electron-vite.org",
   "scripts": {
     "format": "prettier --write .",
@@ -25,7 +25,7 @@
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "electron-store": "^8.2.0",
-    "mssql": "^12.7.0",
+    "mssql": "^11.0.1",
     "mysql-events": "^0.0.11",
     "mysql2": "^3.23.3",
     "pg": "^8.23.0"
@@ -39,7 +39,7 @@
     "@vitejs/plugin-vue": "^5.0.3",
     "@vue/eslint-config-prettier": "^9.0.0",
     "@vue/eslint-config-typescript": "^12.0.0",
-    "electron": "^28.2.0",
+    "electron": "^33.4.11",
     "electron-builder": "^24.9.1",
     "electron-vite": "^2.0.0",
     "eslint": "^8.56.0",
