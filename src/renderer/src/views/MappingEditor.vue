@@ -45,19 +45,72 @@ const templates = ref<MappingTemplate[]>([])
 const ddlText = ref('')
 const parseInfo = ref('')
 
+// ---------- 自定义字段 ----------
+const CUSTOM_FIELD_PREFIX = 'custom_'
+
+function isCustomField(column: string): boolean {
+  return column.startsWith(CUSTOM_FIELD_PREFIX)
+}
+
+function addCustomField(): void {
+  const id = uid()
+  const column = `${CUSTOM_FIELD_PREFIX}${id}`
+  const newField: MappingField = {
+    column,
+    field: `custom_field`,
+    esType: 'keyword',
+    addKeyword: false,
+    indexable: true,
+    analyzed: false,
+    analyzer: 'standard',
+    comment: '自定义字段'
+  }
+  allFieldsSnapshot.value.push(newField)
+  fields.value.push(JSON.parse(JSON.stringify(newField)))
+  void schedulePreview()
+}
+
+function removeCustomField(column: string): void {
+  const snapIdx = allFieldsSnapshot.value.findIndex((f) => f.column === column)
+  if (snapIdx >= 0) {
+    allFieldsSnapshot.value.splice(snapIdx, 1)
+  }
+  const fieldIdx = fields.value.findIndex((f) => f.column === column)
+  if (fieldIdx >= 0) {
+    fields.value.splice(fieldIdx, 1)
+  }
+  void schedulePreview()
+}
+
+function resetCustomField(f: MappingField): void {
+  f.field = 'custom_field'
+  f.esType = 'keyword'
+  f.addKeyword = false
+  f.indexable = true
+  f.analyzed = false
+  f.analyzer = 'standard'
+  f.scalingFactor = undefined
+  f.format = undefined
+  f.comment = '自定义字段'
+}
+
 // ---------- 字段选择（表格最左列，控制是否加入 Mapping） ----------
 // 全量字段快照：永远保存表结构所有列，方便用户「加回」之前取消的列
 const allFieldsSnapshot = ref<MappingField[]>([])
 
-const allIncluded = computed(
-  () => fields.value.length === allFieldsSnapshot.value.length && allFieldsSnapshot.value.length > 0
-)
+const allIncluded = computed(() => {
+  const dbFields = allFieldsSnapshot.value.filter((f) => !isCustomField(f.column))
+  const dbFieldsIncluded = fields.value.filter((f) => !isCustomField(f.column))
+  return dbFields.length > 0 && dbFieldsIncluded.length === dbFields.length
+})
 
 function isIncluded(column: string): boolean {
+  if (isCustomField(column)) return true
   return fields.value.some((f) => f.column === column)
 }
 
 function toggleInclude(column: string): void {
+  if (isCustomField(column)) return
   const idx = fields.value.findIndex((f) => f.column === column)
   if (idx >= 0) {
     fields.value.splice(idx, 1)
@@ -84,18 +137,29 @@ function toggleInclude(column: string): void {
 }
 
 function toggleIncludeAll(): void {
+  // 获取所有自定义字段（保留）
+  const customFields = fields.value.filter((f) => isCustomField(f.column))
+  const customFieldsInSnapshot = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
+
   if (allIncluded.value) {
-    // 全部取消（实际同步不会使用空 mapping，但允许用户先清再勾）
-    fields.value = []
+    // 全部取消（只取消库字段，保留自定义字段）
+    fields.value = [...customFields]
   } else {
-    // 全选：恢复快照里的所有列，保留用户已修改过的字段
+    // 全选：恢复快照里的所有库列，保留用户已修改过的字段，同时保留自定义字段
     const currentMap = new Map(fields.value.map((f) => [f.column, f]))
     const order = allFieldsSnapshot.value.map((f) => f.column)
-    const next: MappingField[] = allFieldsSnapshot.value.map((snap) => {
+    const dbSnapshots = allFieldsSnapshot.value.filter((f) => !isCustomField(f.column))
+    const nextDbFields: MappingField[] = dbSnapshots.map((snap) => {
       const cur = currentMap.get(snap.column)
       const base: MappingField = cur ? cur : JSON.parse(JSON.stringify(snap))
       return base
     })
+    // 合并自定义字段（优先从 fields 中取已修改的，否则从 snapshot 取）
+    const mergedCustomFields = customFieldsInSnapshot.map((snap) => {
+      const cur = currentMap.get(snap.column)
+      return cur ? cur : JSON.parse(JSON.stringify(snap))
+    })
+    const next: MappingField[] = [...nextDbFields, ...mergedCustomFields]
     // 按 snapshot 顺序排序
     next.sort((a, b) => order.indexOf(a.column) - order.indexOf(b.column))
     fields.value = next
@@ -150,11 +214,29 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
   loading.value = true
   indexExists.value = false
   try {
+    // 保存现有的自定义字段
+    const existingCustomFields = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
+    const existingCustomFieldsMap = new Map(
+      fields.value.filter((f) => isCustomField(f.column)).map((f) => [f.column, f])
+    )
+
     meta.value = await window.api.datasource.structure(serialize(cfg), database, table)
     console.log(meta.value)
     if (!indexName.value) indexName.value = table
-    fields.value = await window.api.mapping.generate(serialize(meta.value), serialize(settings))
-    allFieldsSnapshot.value = JSON.parse(JSON.stringify(fields.value))
+    const generatedFields = await window.api.mapping.generate(
+      serialize(meta.value),
+      serialize(settings)
+    )
+    // 合并自定义字段（保留用户修改）
+    const mergedCustomFields = existingCustomFields.map((snap) => {
+      const cur = existingCustomFieldsMap.get(snap.column)
+      return cur ? cur : JSON.parse(JSON.stringify(snap))
+    })
+    fields.value = [...generatedFields, ...mergedCustomFields]
+    allFieldsSnapshot.value = [
+      ...JSON.parse(JSON.stringify(generatedFields)),
+      ...existingCustomFields
+    ]
     await schedulePreview()
   } catch (e) {
     emit('snack', `读取表结构失败：${(e as Error).message}`, 'error')
@@ -165,9 +247,24 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
 
 async function regenerate(): Promise<void> {
   if (!meta.value) return
-  fields.value = await window.api.mapping.generate(meta.value, serialize(settings))
-  allFieldsSnapshot.value = JSON.parse(JSON.stringify(fields.value))
-  emit('snack', '已按默认规则重新生成')
+  // 保存现有的自定义字段
+  const existingCustomFields = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
+  const existingCustomFieldsMap = new Map(
+    fields.value.filter((f) => isCustomField(f.column)).map((f) => [f.column, f])
+  )
+
+  const generatedFields = await window.api.mapping.generate(meta.value, serialize(settings))
+  // 合并自定义字段（保留用户修改）
+  const mergedCustomFields = existingCustomFields.map((snap) => {
+    const cur = existingCustomFieldsMap.get(snap.column)
+    return cur ? cur : JSON.parse(JSON.stringify(snap))
+  })
+  fields.value = [...generatedFields, ...mergedCustomFields]
+  allFieldsSnapshot.value = [
+    ...JSON.parse(JSON.stringify(generatedFields)),
+    ...existingCustomFields
+  ]
+  emit('snack', '已按默认规则重新生成（自定义字段已保留）')
   await schedulePreview()
 }
 
@@ -343,6 +440,12 @@ async function applySettingDefaults(): Promise<void> {
 async function parseDdl(): Promise<void> {
   if (!ddlText.value.trim()) return
   try {
+    // 保存现有的自定义字段
+    const existingCustomFields = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
+    const existingCustomFieldsMap = new Map(
+      fields.value.filter((f) => isCustomField(f.column)).map((f) => [f.column, f])
+    )
+
     const m = await window.api.mapping.parseDDL(ddlText.value)
     if (!m) {
       parseInfo.value = '未能解析 DDL，请粘贴完整 CREATE TABLE 语句'
@@ -351,8 +454,17 @@ async function parseDdl(): Promise<void> {
     mode.value = 'ddl'
     meta.value = m
     if (!indexName.value) indexName.value = m.table
-    fields.value = await window.api.mapping.generate(m, serialize(settings))
-    allFieldsSnapshot.value = JSON.parse(JSON.stringify(fields.value))
+    const generatedFields = await window.api.mapping.generate(m, serialize(settings))
+    // 合并自定义字段（保留用户修改）
+    const mergedCustomFields = existingCustomFields.map((snap) => {
+      const cur = existingCustomFieldsMap.get(snap.column)
+      return cur ? cur : JSON.parse(JSON.stringify(snap))
+    })
+    fields.value = [...generatedFields, ...mergedCustomFields]
+    allFieldsSnapshot.value = [
+      ...JSON.parse(JSON.stringify(generatedFields)),
+      ...existingCustomFields
+    ]
     parseInfo.value = `已解析 ${m.table} · ${m.columns.length} 列`
     await schedulePreview()
   } catch (e) {
@@ -442,6 +554,7 @@ function short(df: string): string {
             <span class="muted small">规则已按默认规范自动生成，可逐行修改或重置</span>
           </h2>
           <div>
+            <button class="btn primary" @click="addCustomField">新增自定义字段</button>
             <button class="btn" @click="regenerate">按规则重置</button>
             <button class="btn" @click="applySettingDefaults">载入全局规则</button>
             <button class="btn" @click="openPreview">预览 JSON</button>
@@ -471,26 +584,41 @@ function short(df: string): string {
               <tr
                 v-for="snap in allFieldsSnapshot"
                 :key="snap.column"
-                :class="{ 'row-excluded': !isIncluded(snap.column) }"
+                :class="{
+                  'row-excluded': !isIncluded(snap.column),
+                  'custom-row': isCustomField(snap.column)
+                }"
               >
                 <td class="col-sel">
                   <input
+                    v-if="!isCustomField(snap.column)"
                     type="checkbox"
                     :checked="isIncluded(snap.column)"
                     @change="toggleInclude(snap.column)"
                   />
+                  <span v-else class="custom-check-placeholder"></span>
                 </td>
-                <template v-if="isIncluded(snap.column)">
+                <template v-if="isIncluded(snap.column) || isCustomField(snap.column)">
                   <td class="col-col">
-                    <span
-                      v-if="meta.columns.find((c) => c.name === snap.column)?.primaryKey"
-                      class="pk-badge"
-                      >PK</span
-                    >
-                    <b>{{ snap.column }}</b>
+                    <template v-if="isCustomField(snap.column)">
+                      <span class="custom-badge">自定义</span>
+                    </template>
+                    <template v-else>
+                      <span
+                        v-if="meta.columns.find((c) => c.name === snap.column)?.primaryKey"
+                        class="pk-badge"
+                        >PK</span
+                      >
+                      <b>{{ snap.column }}</b>
+                    </template>
                   </td>
                   <td class="mono raw">
-                    {{ meta.columns.find((c) => c.name === snap.column)?.rawType || '-' }}
+                    <template v-if="isCustomField(snap.column)">
+                      <span class="muted">—</span>
+                    </template>
+                    <template v-else>
+                      {{ meta.columns.find((c) => c.name === snap.column)?.rawType || '-' }}
+                    </template>
                   </td>
                   <template
                     v-for="renderF in [fields.find((x) => x.column === snap.column)!]"
@@ -536,7 +664,22 @@ function short(df: string): string {
                       </template>
                     </td>
                     <td><input v-model="renderF.comment" class="cmt" type="text" /></td>
-                    <td><button class="btn mini-btn" @click="resetRow(renderF)">重置</button></td>
+                    <td class="col-rst">
+                      <template v-if="isCustomField(snap.column)">
+                        <button
+                          class="btn mini-btn danger-ghost"
+                          @click="removeCustomField(snap.column)"
+                        >
+                          删除
+                        </button>
+                        <button class="btn mini-btn" @click="resetCustomField(renderF)">
+                          重置
+                        </button>
+                      </template>
+                      <template v-else>
+                        <button class="btn mini-btn" @click="resetRow(renderF)">重置</button>
+                      </template>
+                    </td>
                   </template>
                 </template>
                 <template v-else>
@@ -565,9 +708,10 @@ function short(df: string): string {
           </table>
         </div>
         <div class="muted pick-tip-inline">
-          默认全选（共 {{ allFieldsSnapshot.length }} 列）。取消最左列勾选后，该字段<strong
-            >不会加入 Mapping，也不会同步到 ES</strong
-          >。 当前已选：<b>{{ fields.length }}</b> 列
+          共 {{ allFieldsSnapshot.filter((f) => !isCustomField(f.column)).length }} 个库字段 +
+          {{ allFieldsSnapshot.filter((f) => isCustomField(f.column)).length }}
+          个自定义字段。取消最左列勾选后，该库字段<strong>不会加入 Mapping，也不会同步到 ES</strong
+          >。 当前包含：<b>{{ fields.length }}</b> 个字段
         </div>
         <div v-if="issues.length" class="issues">
           <div
@@ -1107,5 +1251,33 @@ function short(df: string): string {
 
 .small {
   font-size: 11.5px;
+}
+
+.custom-row {
+  background: #f0fdf4;
+}
+
+.custom-row:hover {
+  background: #dcfce7;
+}
+
+.custom-badge {
+  background: #dcfce7;
+  color: #15803d;
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 1px 4px;
+  margin-right: 5px;
+  font-weight: 600;
+}
+
+.custom-check-placeholder {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+}
+
+.row-excluded {
+  opacity: 0.5;
 }
 </style>
