@@ -45,6 +45,64 @@ const templates = ref<MappingTemplate[]>([])
 const ddlText = ref('')
 const parseInfo = ref('')
 
+// ---------- 字段选择（表格最左列，控制是否加入 Mapping） ----------
+// 全量字段快照：永远保存表结构所有列，方便用户「加回」之前取消的列
+const allFieldsSnapshot = ref<MappingField[]>([])
+
+const allIncluded = computed(
+  () => fields.value.length === allFieldsSnapshot.value.length && allFieldsSnapshot.value.length > 0
+)
+
+function isIncluded(column: string): boolean {
+  return fields.value.some((f) => f.column === column)
+}
+
+function toggleInclude(column: string): void {
+  const idx = fields.value.findIndex((f) => f.column === column)
+  if (idx >= 0) {
+    fields.value.splice(idx, 1)
+  } else {
+    const snap = allFieldsSnapshot.value.find((f) => f.column === column)
+    if (!snap) return
+    // 插入到与 snapshot 相同的顺序位置
+    const order = allFieldsSnapshot.value.map((f) => f.column)
+    const copy: MappingField = JSON.parse(JSON.stringify(snap))
+    // 如果用户之前改过这个字段（在 template/full snapshot 中没记录），这里取 snapshot 的初始化值
+    // 我们需要从全量快照的顺序找插入点
+    const insertAt = order.indexOf(column)
+    const fieldsOrder = fields.value.map((f) => order.indexOf(f.column))
+    let pos = fields.value.length
+    for (let i = 0; i < fieldsOrder.length; i++) {
+      if (fieldsOrder[i] > insertAt) {
+        pos = i
+        break
+      }
+    }
+    fields.value.splice(pos, 0, copy)
+  }
+  void schedulePreview()
+}
+
+function toggleIncludeAll(): void {
+  if (allIncluded.value) {
+    // 全部取消（实际同步不会使用空 mapping，但允许用户先清再勾）
+    fields.value = []
+  } else {
+    // 全选：恢复快照里的所有列，保留用户已修改过的字段
+    const currentMap = new Map(fields.value.map((f) => [f.column, f]))
+    const order = allFieldsSnapshot.value.map((f) => f.column)
+    const next: MappingField[] = allFieldsSnapshot.value.map((snap) => {
+      const cur = currentMap.get(snap.column)
+      const base: MappingField = cur ? cur : JSON.parse(JSON.stringify(snap))
+      return base
+    })
+    // 按 snapshot 顺序排序
+    next.sort((a, b) => order.indexOf(a.column) - order.indexOf(b.column))
+    fields.value = next
+  }
+  void schedulePreview()
+}
+
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(async () => {
@@ -96,6 +154,7 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
     console.log(meta.value)
     if (!indexName.value) indexName.value = table
     fields.value = await window.api.mapping.generate(serialize(meta.value), serialize(settings))
+    allFieldsSnapshot.value = JSON.parse(JSON.stringify(fields.value))
     await schedulePreview()
   } catch (e) {
     emit('snack', `读取表结构失败：${(e as Error).message}`, 'error')
@@ -107,6 +166,7 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
 async function regenerate(): Promise<void> {
   if (!meta.value) return
   fields.value = await window.api.mapping.generate(meta.value, serialize(settings))
+  allFieldsSnapshot.value = JSON.parse(JSON.stringify(fields.value))
   emit('snack', '已按默认规则重新生成')
   await schedulePreview()
 }
@@ -292,6 +352,7 @@ async function parseDdl(): Promise<void> {
     meta.value = m
     if (!indexName.value) indexName.value = m.table
     fields.value = await window.api.mapping.generate(m, serialize(settings))
+    allFieldsSnapshot.value = JSON.parse(JSON.stringify(fields.value))
     parseInfo.value = `已解析 ${m.table} · ${m.columns.length} 列`
     await schedulePreview()
   } catch (e) {
@@ -391,6 +452,9 @@ function short(df: string): string {
           <table class="grid">
             <thead>
               <tr>
+                <th class="col-sel">
+                  <input type="checkbox" :checked="allIncluded" @change="toggleIncludeAll" />
+                </th>
                 <th class="col-col">原库字段</th>
                 <th class="col-raw">原类型</th>
                 <th class="col-es">ES 类型</th>
@@ -404,54 +468,106 @@ function short(df: string): string {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="f in fields" :key="f.column">
-                <td class="col-col">
-                  <span
-                    v-if="meta.columns.find((c) => c.name === f.column)?.primaryKey"
-                    class="pk-badge"
-                    >PK</span
+              <tr
+                v-for="snap in allFieldsSnapshot"
+                :key="snap.column"
+                :class="{ 'row-excluded': !isIncluded(snap.column) }"
+              >
+                <td class="col-sel">
+                  <input
+                    type="checkbox"
+                    :checked="isIncluded(snap.column)"
+                    @change="toggleInclude(snap.column)"
+                  />
+                </td>
+                <template v-if="isIncluded(snap.column)">
+                  <td class="col-col">
+                    <span
+                      v-if="meta.columns.find((c) => c.name === snap.column)?.primaryKey"
+                      class="pk-badge"
+                      >PK</span
+                    >
+                    <b>{{ snap.column }}</b>
+                  </td>
+                  <td class="mono raw">
+                    {{ meta.columns.find((c) => c.name === snap.column)?.rawType || '-' }}
+                  </td>
+                  <template
+                    v-for="renderF in [fields.find((x) => x.column === snap.column)!]"
+                    :key="renderF.column"
                   >
-                  <b>{{ f.column }}</b>
-                </td>
-                <td class="mono raw">
-                  {{ meta.columns.find((c) => c.name === f.column)?.rawType || '-' }}
-                </td>
-                <td>
-                  <select v-model="f.esType" class="es-type" @change="fieldTypeChanged(f)">
-                    <option v-for="t in ES_TYPE_OPTIONS" :key="t" :value="t">{{ t }}</option>
-                  </select>
-                </td>
-                <td><input v-model="f.field" class="fld" type="text" /></td>
-                <td>
-                  <input v-model="f.addKeyword" type="checkbox" :disabled="f.esType !== 'text'" />
-                </td>
-                <td><input v-model="f.indexable" type="checkbox" /></td>
-                <td>
-                  <select v-model="f.analyzer" :disabled="f.esType !== 'text'">
-                    <option v-for="a in ANALYZER_OPTIONS" :key="a" :value="a">{{ a }}</option>
-                  </select>
-                </td>
-                <td>
-                  <template v-if="f.esType === 'scaled_float'">
-                    <span class="mini-label">scaling</span>
-                    <input v-model.number="f.scalingFactor" class="mini" type="number" />
+                    <td>
+                      <select
+                        v-model="renderF.esType"
+                        class="es-type"
+                        @change="fieldTypeChanged(renderF)"
+                      >
+                        <option v-for="t in ES_TYPE_OPTIONS" :key="t" :value="t">{{ t }}</option>
+                      </select>
+                    </td>
+                    <td><input v-model="renderF.field" class="fld" type="text" /></td>
+                    <td>
+                      <input
+                        v-model="renderF.addKeyword"
+                        type="checkbox"
+                        :disabled="renderF.esType !== 'text'"
+                      />
+                    </td>
+                    <td><input v-model="renderF.indexable" type="checkbox" /></td>
+                    <td>
+                      <select v-model="renderF.analyzer" :disabled="renderF.esType !== 'text'">
+                        <option v-for="a in ANALYZER_OPTIONS" :key="a" :value="a">{{ a }}</option>
+                      </select>
+                    </td>
+                    <td>
+                      <template v-if="renderF.esType === 'scaled_float'">
+                        <span class="mini-label">scaling</span>
+                        <input v-model.number="renderF.scalingFactor" class="mini" type="number" />
+                      </template>
+                      <template v-else-if="renderF.esType === 'date'">
+                        <select v-model="renderF.format" class="mini-date">
+                          <option v-for="df in DATE_FORMAT_OPTIONS" :key="df" :value="df">
+                            {{ short(df) }}
+                          </option>
+                        </select>
+                      </template>
+                      <template v-else>
+                        <span class="muted">—</span>
+                      </template>
+                    </td>
+                    <td><input v-model="renderF.comment" class="cmt" type="text" /></td>
+                    <td><button class="btn mini-btn" @click="resetRow(renderF)">重置</button></td>
                   </template>
-                  <template v-else-if="f.esType === 'date'">
-                    <select v-model="f.format" class="mini-date">
-                      <option v-for="df in DATE_FORMAT_OPTIONS" :key="df" :value="df">
-                        {{ short(df) }}
-                      </option>
-                    </select>
-                  </template>
-                  <template v-else>
-                    <span class="muted">—</span>
-                  </template>
-                </td>
-                <td><input v-model="f.comment" class="cmt" type="text" /></td>
-                <td><button class="btn mini-btn" @click="resetRow(f)">重置</button></td>
+                </template>
+                <template v-else>
+                  <td class="col-col">
+                    <span
+                      v-if="meta.columns.find((c) => c.name === snap.column)?.primaryKey"
+                      class="pk-badge"
+                      >PK</span
+                    >
+                    <span class="excl-col">{{ snap.column }}</span>
+                  </td>
+                  <td class="mono raw excl">
+                    {{ meta.columns.find((c) => c.name === snap.column)?.rawType || '-' }}
+                  </td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                  <td><span class="muted">—</span></td>
+                </template>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div class="muted pick-tip-inline">
+          默认全选（共 {{ allFieldsSnapshot.length }} 列）。取消最左列勾选后，该字段<strong
+            >不会加入 Mapping，也不会同步到 ES</strong
+          >。 当前已选：<b>{{ fields.length }}</b> 列
         </div>
         <div v-if="issues.length" class="issues">
           <div
@@ -939,5 +1055,57 @@ function short(df: string): string {
 .issue-warn {
   background: #fffbeb;
   color: #a16207;
+}
+
+.modal-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pick-tip {
+  margin-bottom: 12px;
+  font-size: 12.5px;
+}
+
+.pick-tip code {
+  font-family: ui-monospace, Menlo, monospace;
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+
+.pick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px 14px;
+  max-height: 460px;
+  overflow: auto;
+  padding: 4px;
+}
+
+.pick-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--es-border);
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.pick-item:hover {
+  background: #f8fafc;
+}
+
+.pick-item input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+}
+
+.small {
+  font-size: 11.5px;
 }
 </style>
