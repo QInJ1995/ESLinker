@@ -93,8 +93,9 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
   indexExists.value = false
   try {
     meta.value = await window.api.datasource.structure(serialize(cfg), database, table)
+    console.log(meta.value)
     if (!indexName.value) indexName.value = table
-    fields.value = await window.api.mapping.generate(meta.value, serialize(settings))
+    fields.value = await window.api.mapping.generate(serialize(meta.value), serialize(settings))
     await schedulePreview()
   } catch (e) {
     emit('snack', `读取表结构失败：${(e as Error).message}`, 'error')
