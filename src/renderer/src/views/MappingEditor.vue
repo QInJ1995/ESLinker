@@ -326,7 +326,7 @@ async function checkExists(): Promise<void> {
       indexExists.value
         ? `索引 ${indexName.value} 已存在`
         : `索引 ${indexName.value} 不存在，可直接创建`,
-      indexExists.value ? 'info' : 'success'
+      'success'
     )
   } catch (e) {
     emit('snack', `检查失败：${(e as Error).message}`, 'error')
