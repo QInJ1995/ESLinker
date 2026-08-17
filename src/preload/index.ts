@@ -14,75 +14,61 @@ import type {
 } from '../main/lib/types'
 import type { EsLinkerApi as Api } from './index.d'
 
-function cloneForIpc<T>(value: T): T {
-  if (value === null || value === undefined) return value
-  if (typeof value !== 'object') return value
-  return JSON.parse(JSON.stringify(value)) as T
-}
-
-function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const cloned = args.map((a) => cloneForIpc(a))
-  return ipcRenderer.invoke(channel, ...cloned)
-}
-
 const api: Api = {
   datasource: {
-    list: (): Promise<DataSourceItem[]> => invoke('datasource:list') as Promise<DataSourceItem[]>,
-    save: (item: DataSourceItem): Promise<boolean> => invoke('datasource:save', item) as Promise<boolean>,
+    list: (): Promise<DataSourceItem[]> => ipcRenderer.invoke('datasource:list'),
+    save: (item: DataSourceItem): Promise<boolean> => ipcRenderer.invoke('datasource:save', item),
     remove: (kind: 'db' | 'es', id: string): Promise<boolean> =>
-      invoke('datasource:delete', kind, id) as Promise<boolean>,
+      ipcRenderer.invoke('datasource:delete', kind, id),
     test: (item: DataSourceItem): Promise<{ ok: boolean; kind?: string; version?: string }> =>
-      invoke('datasource:test', item) as Promise<{ ok: boolean; kind?: string; version?: string }>,
+      ipcRenderer.invoke('datasource:test', item),
     tree: (
       cfg: DbConfig
     ): Promise<{
       databases: string[]
       trees: Array<{ database: string; tables: Array<{ name: string; comment?: string | null }> }>
-    }> => invoke('datasource:tree', cfg) as Promise<{
-      databases: string[]
-      trees: Array<{ database: string; tables: Array<{ name: string; comment?: string | null }> }>
-    }>,
+    }> => ipcRenderer.invoke('datasource:tree', cfg),
     structure: (cfg: DbConfig, database: string, table: string): Promise<TableMeta> =>
-      invoke('datasource:structure', cfg, database, table) as Promise<TableMeta>
+      ipcRenderer.invoke('datasource:structure', cfg, database, table)
   },
   mapping: {
     generate: (meta: TableMeta, settings: Settings): Promise<MappingField[]> =>
-      invoke('mapping:generate', meta, settings) as Promise<MappingField[]>,
+      ipcRenderer.invoke('mapping:generate', meta, settings),
     document: (fields: MappingField[], settings: Settings): Promise<unknown> =>
-      invoke('mapping:document', fields, settings),
+      ipcRenderer.invoke('mapping:document', fields, settings),
     parseDDL: (ddl: string): Promise<TableMeta | null> =>
-      invoke('mapping:parseDDL', ddl) as Promise<TableMeta | null>,
+      ipcRenderer.invoke('mapping:parseDDL', ddl),
     validate: (fields: MappingField[]): Promise<MappingIssue[]> =>
-      invoke('mapping:validate', fields) as Promise<MappingIssue[]>
+      ipcRenderer.invoke('mapping:validate', fields)
   },
   templates: {
-    list: (): Promise<MappingTemplate[]> => invoke('templates:list') as Promise<MappingTemplate[]>,
-    save: (tpl: MappingTemplate): Promise<boolean> => invoke('templates:save', tpl) as Promise<boolean>,
-    remove: (id: string): Promise<boolean> => invoke('templates:delete', id) as Promise<boolean>
+    list: (): Promise<MappingTemplate[]> => ipcRenderer.invoke('templates:list'),
+    save: (tpl: MappingTemplate): Promise<boolean> => ipcRenderer.invoke('templates:save', tpl),
+    remove: (id: string): Promise<boolean> => ipcRenderer.invoke('templates:delete', id)
   },
   es: {
     test: (cfg: EsConfig): Promise<{ version: string; cluster: string }> =>
-      invoke('es:test', cfg) as Promise<{ version: string; cluster: string }>,
+      ipcRenderer.invoke('es:test', cfg),
     exists: (cfg: EsConfig, index: string): Promise<boolean> =>
-      invoke('es:exists', cfg, index) as Promise<boolean>,
+      ipcRenderer.invoke('es:exists', cfg, index),
     create: (cfg: EsConfig, index: string, doc: unknown, overwrite: boolean): Promise<unknown> =>
-      invoke('es:create', cfg, index, doc, overwrite),
+      ipcRenderer.invoke('es:create', cfg, index, doc, overwrite),
     update: (cfg: EsConfig, index: string, properties: unknown): Promise<boolean> =>
-      invoke('es:update', cfg, index, properties) as Promise<boolean>,
+      ipcRenderer.invoke('es:update', cfg, index, properties),
     remove: (cfg: EsConfig, index: string): Promise<boolean> =>
-      invoke('es:delete', cfg, index) as Promise<boolean>,
+      ipcRenderer.invoke('es:delete', cfg, index),
     export: (doc: unknown, fileName: string): Promise<string | null> =>
-      invoke('es:export', doc, fileName) as Promise<string | null>
+      ipcRenderer.invoke('es:export', doc, fileName)
   },
   sync: {
-    list: (): Promise<SyncTask[]> => invoke('sync:list') as Promise<SyncTask[]>,
-    save: (task: SyncTask): Promise<boolean> => invoke('sync:save', task) as Promise<boolean>,
-    remove: (id: string): Promise<boolean> => invoke('sync:delete', id) as Promise<boolean>,
-    start: (id: string): Promise<boolean> => invoke('sync:start', id) as Promise<boolean>,
-    pause: (id: string): Promise<boolean> => invoke('sync:pause', id) as Promise<boolean>,
-    resume: (id: string): Promise<boolean> => invoke('sync:resume', id) as Promise<boolean>,
-    stop: (id: string): Promise<boolean> => invoke('sync:stop', id) as Promise<boolean>,
-    restart: (id: string): Promise<boolean> => invoke('sync:restart', id) as Promise<boolean>,
+    list: (): Promise<SyncTask[]> => ipcRenderer.invoke('sync:list'),
+    save: (task: SyncTask): Promise<boolean> => ipcRenderer.invoke('sync:save', task),
+    remove: (id: string): Promise<boolean> => ipcRenderer.invoke('sync:delete', id),
+    start: (id: string): Promise<boolean> => ipcRenderer.invoke('sync:start', id),
+    pause: (id: string): Promise<boolean> => ipcRenderer.invoke('sync:pause', id),
+    resume: (id: string): Promise<boolean> => ipcRenderer.invoke('sync:resume', id),
+    stop: (id: string): Promise<boolean> => ipcRenderer.invoke('sync:stop', id),
+    restart: (id: string): Promise<boolean> => ipcRenderer.invoke('sync:restart', id),
     onEvent: (cb: (payload: SyncEventPayload) => void): (() => void) => {
       const listener = (_e: unknown, payload: SyncEventPayload): void => cb(payload)
       ipcRenderer.on('sync:event', listener)
@@ -90,12 +76,12 @@ const api: Api = {
     }
   },
   settings: {
-    get: (): Promise<Settings> => invoke('settings:get') as Promise<Settings>,
-    set: (s: Settings): Promise<boolean> => invoke('settings:set', s) as Promise<boolean>
+    get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+    set: (s: Settings): Promise<boolean> => ipcRenderer.invoke('settings:set', s)
   },
   log: {
-    read: (taskId: string): Promise<string> => invoke('log:read', taskId) as Promise<string>,
-    export: (): Promise<{ dir: string; files: string[] }> => invoke('log:export') as Promise<{ dir: string; files: string[] }>
+    read: (taskId: string): Promise<string> => ipcRenderer.invoke('log:read', taskId),
+    export: (): Promise<{ dir: string; files: string[] }> => ipcRenderer.invoke('log:export')
   }
 }
 
