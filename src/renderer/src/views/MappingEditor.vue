@@ -495,6 +495,20 @@ function fieldTypeChanged(f: MappingField): void {
     f.scalingFactor = f.scalingFactor || 100
   }
   if (f.esType !== 'date') f.format = undefined
+  if (f.esType !== 'text') {
+    f.analyzer = 'standard'
+    f.analyzed = false
+    f.addKeyword = false
+  }
+}
+
+function analyzerChanged(f: MappingField): void {
+  // 选择了非 standard 分词器时，自动开启 analyzed（分词模式）
+  if (f.analyzer && f.analyzer !== 'standard') {
+    f.analyzed = true
+  } else {
+    f.analyzed = false
+  }
 }
 
 function short(df: string): string {
@@ -643,7 +657,11 @@ function short(df: string): string {
                     </td>
                     <td><input v-model="renderF.indexable" type="checkbox" /></td>
                     <td>
-                      <select v-model="renderF.analyzer" :disabled="renderF.esType !== 'text'">
+                      <select
+                        v-model="renderF.analyzer"
+                        :disabled="renderF.esType !== 'text'"
+                        @change="analyzerChanged(renderF)"
+                      >
                         <option v-for="a in ANALYZER_OPTIONS" :key="a" :value="a">{{ a }}</option>
                       </select>
                     </td>
