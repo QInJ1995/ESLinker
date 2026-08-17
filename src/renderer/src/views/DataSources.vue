@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, toRaw } from 'vue'
 import type { DataSourceItem, DbConfig, EsConfig } from '../lib/core'
 import { DB_TYPE_LABELS, uid } from '../lib/core'
+
+function serialize<T>(value: T): T {
+  if (value === null || value === undefined) return value
+  return JSON.parse(JSON.stringify(toRaw(value))) as T
+}
 
 const emit = defineEmits<{
   (e: 'snack', text: string, type?: string): void
@@ -110,14 +115,14 @@ async function testConnection(): Promise<void> {
         const stored = dbSources.value.find((s) => s.id === cfg.id)
         if (stored?.password) cfg.password = stored.password
       }
-      payload = { kind: 'db', db: cfg }
+      payload = { kind: 'db', db: serialize(cfg) }
     } else {
       const cfg = { ...esForm }
       if (!cfg.password) {
         const stored = esSources.value.find((s) => s.id === cfg.id)
         if (stored?.password) cfg.password = stored.password
       }
-      payload = { kind: 'es', es: cfg }
+      payload = { kind: 'es', es: serialize(cfg) }
     }
     const res = await window.api.datasource.test(payload)
     emit('snack', res.version ? `ES 连接成功：${res.version}` : '数据库连接成功', 'success')
@@ -134,14 +139,14 @@ async function save(): Promise<void> {
         const stored = dbSources.value.find((s) => s.id === cfg.id)
         cfg.password = stored?.password || ''
       }
-      await window.api.datasource.save({ kind: 'db', db: cfg })
+      await window.api.datasource.save({ kind: 'db', db: serialize(cfg) })
     } else {
       const cfg: EsConfig = { ...esForm }
       if (!cfg.password) {
         const stored = esSources.value.find((s) => s.id === cfg.id)
         cfg.password = stored?.password || ''
       }
-      await window.api.datasource.save({ kind: 'es', es: cfg })
+      await window.api.datasource.save({ kind: 'es', es: serialize(cfg) })
     }
     modal.open = false
     emit('snack', '已保存', 'success')
@@ -169,7 +174,7 @@ async function loadTree(cfg: DbConfig): Promise<void> {
   }
   treeLoading.value = true
   try {
-    const res = await window.api.datasource.tree(cfg)
+    const res = await window.api.datasource.tree(serialize(cfg))
     const tables = new Map<string, string[]>()
     for (const branch of res.trees) {
       tables.set(
@@ -180,6 +185,7 @@ async function loadTree(cfg: DbConfig): Promise<void> {
     tree.value = { cfg, databases: res.databases, tables }
     expanded.clear()
   } catch (e) {
+    console.error('loadTree', e)
     emit('snack', `加载表结构失败：${(e as Error).message}`, 'error')
   } finally {
     treeLoading.value = false
@@ -257,13 +263,8 @@ function clickTable(database: string, table: string): void {
             <div v-if="(tree.tables.get(db) || []).length === 0" class="muted tree-leaf">
               （无表）
             </div>
-            <div
-              v-for="t in tree.tables.get(db) || []"
-              :key="t"
-              class="tree-leaf clickable"
-              title="打开 Mapping 编辑器"
-              @click="clickTable(db, t)"
-            >
+            <div v-for="t in tree.tables.get(db) || []" :key="t" class="tree-leaf clickable" title="打开 Mapping 编辑器"
+              @click="clickTable(db, t)">
               ▦ {{ t }}
             </div>
           </div>
@@ -341,12 +342,8 @@ function clickTable(database: string, table: string): void {
               </label>
               <label>
                 密码
-                <input
-                  v-model="dbForm.password"
-                  type="password"
-                  autocomplete="new-password"
-                  :placeholder="modal.editing ? '留空表示保持不变' : ''"
-                />
+                <input v-model="dbForm.password" type="password" autocomplete="new-password"
+                  :placeholder="modal.editing ? '留空表示保持不变' : ''" />
               </label>
               <label>
                 默认数据库（可选）
@@ -387,12 +384,8 @@ function clickTable(database: string, table: string): void {
               </label>
               <label>
                 密码
-                <input
-                  v-model="esForm.password"
-                  type="password"
-                  autocomplete="new-password"
-                  :placeholder="modal.editing ? '留空表示保持不变' : ''"
-                />
+                <input v-model="esForm.password" type="password" autocomplete="new-password"
+                  :placeholder="modal.editing ? '留空表示保持不变' : ''" />
               </label>
               <label>
                 API Key（可选，优先于账号密码）
@@ -512,7 +505,7 @@ function clickTable(database: string, table: string): void {
   color: var(--es-text);
 }
 
-.btn + .btn {
+.btn+.btn {
   margin-left: 6px;
 }
 

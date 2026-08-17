@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, toRaw } from 'vue'
 import type {
   DbConfig,
   EsConfig,
@@ -15,6 +15,11 @@ import {
   DEFAULT_SETTINGS,
   uid
 } from '../lib/core'
+
+function serialize<T>(value: T): T {
+  if (value === null || value === undefined) return value
+  return JSON.parse(JSON.stringify(toRaw(value))) as T
+}
 
 const props = defineProps<{
   tableContext: { cfg: DbConfig; database: string; table: string } | null
@@ -91,9 +96,9 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
   loading.value = true
   indexExists.value = false
   try {
-    meta.value = await window.api.datasource.structure(cfg, database, table)
+    meta.value = await window.api.datasource.structure(serialize(cfg), database, table)
     if (!indexName.value) indexName.value = table
-    fields.value = await window.api.mapping.generate(meta.value, settings)
+    fields.value = await window.api.mapping.generate(meta.value, serialize(settings))
     await schedulePreview()
   } catch (e) {
     emit('snack', `读取表结构失败：${(e as Error).message}`, 'error')
@@ -104,7 +109,7 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
 
 async function regenerate(): Promise<void> {
   if (!meta.value) return
-  fields.value = await window.api.mapping.generate(meta.value, settings)
+  fields.value = await window.api.mapping.generate(meta.value, serialize(settings))
   emit('snack', '已按默认规则重新生成')
   await schedulePreview()
 }
@@ -136,9 +141,9 @@ async function schedulePreview(): Promise<void> {
 async function buildDoc(): Promise<void> {
   if (fields.value.length === 0) return
   try {
-    doc.value = (await window.api.mapping.document(fields.value, settings)) as MappingDocument
+    doc.value = (await window.api.mapping.document(serialize(fields.value), serialize(settings))) as MappingDocument
     previewText.value = JSON.stringify(doc.value, null, 2)
-    issues.value = (await window.api.mapping.validate(fields.value)) as typeof issues.value
+    issues.value = (await window.api.mapping.validate(serialize(fields.value))) as typeof issues.value
   } catch (e) {
     emit('snack', String((e as Error).message), 'error')
   }
@@ -156,7 +161,7 @@ async function checkExists(): Promise<void> {
   }
   checkingIndex.value = true
   try {
-    indexExists.value = await window.api.es.exists(esCfg.value, indexName.value)
+    indexExists.value = await window.api.es.exists(serialize(esCfg.value), indexName.value)
     emit(
       'snack',
       indexExists.value
@@ -185,7 +190,7 @@ async function createIndex(): Promise<void> {
   }
   let overwrite = false
   try {
-    const exists = await window.api.es.exists(esCfg.value, indexName.value)
+    const exists = await window.api.es.exists(serialize(esCfg.value), indexName.value)
     if (exists) {
       if (
         !window.confirm(
@@ -198,9 +203,9 @@ async function createIndex(): Promise<void> {
       overwrite = true
     }
     const res = (await window.api.es.create(
-      esCfg.value,
+      serialize(esCfg.value),
       indexName.value,
-      doc.value,
+      serialize(doc.value),
       overwrite
     )) as {
       created: boolean
@@ -220,7 +225,7 @@ async function createIndex(): Promise<void> {
 async function updateMapping(): Promise<void> {
   if (!esCfg.value || !indexName.value || !doc.value) return
   try {
-    await window.api.es.update(esCfg.value, indexName.value, doc.value.mappings.properties)
+    await window.api.es.update(serialize(esCfg.value), indexName.value, serialize(doc.value.mappings.properties))
     emit('snack', 'Mapping 已推送更新', 'success')
   } catch (e) {
     emit('snack', `更新失败：${(e as Error).message}`, 'error')
@@ -231,7 +236,7 @@ async function exportJson(): Promise<void> {
   if (!doc.value || !indexName.value) return
   await buildDoc()
   if (!doc.value) return
-  const path = await window.api.es.export(doc.value, `${indexName.value}.mapping.json`)
+  const path = await window.api.es.export(serialize(doc.value), `${indexName.value}.mapping.json`)
   emit('snack', path ? `已导出：${path}` : '已取消导出', path ? 'success' : 'info')
 }
 
@@ -244,7 +249,7 @@ async function saveTemplate(): Promise<void> {
     createdAt: new Date().toISOString(),
     fields: JSON.parse(JSON.stringify(fields.value))
   }
-  await window.api.templates.save(tpl)
+  await window.api.templates.save(serialize(tpl))
   await loadTemplates()
   emit('snack', '模板已保存', 'success')
 }
@@ -280,7 +285,7 @@ async function parseDdl(): Promise<void> {
     mode.value = 'ddl'
     meta.value = m
     if (!indexName.value) indexName.value = m.table
-    fields.value = await window.api.mapping.generate(m, settings)
+    fields.value = await window.api.mapping.generate(m, serialize(settings))
     parseInfo.value = `已解析 ${m.table} · ${m.columns.length} 列`
     await schedulePreview()
   } catch (e) {
@@ -311,9 +316,7 @@ function short(df: string): string {
       <div class="head-tools">
         <div v-if="meta && mode === 'table'" class="meta-chip">
           表：{{ meta.database }}.{{ meta.table }}
-          <span class="muted"
-            >· {{ meta.columns.length }} 列 · 主键 {{ meta.primaryKey || '无' }}</span
-          >
+          <span class="muted">· {{ meta.columns.length }} 列 · 主键 {{ meta.primaryKey || '无' }}</span>
         </div>
         <button class="btn ghost" :class="{ active: mode === 'table' }" @click="switchTableMode">
           数据库表
@@ -326,12 +329,11 @@ function short(df: string): string {
 
     <!-- DDL offline panel -->
     <section v-if="mode === 'ddl' && !meta" class="panel ddl-panel">
-      <div class="panel-head"><h2>粘贴 CREATE TABLE，离线生成 Mapping</h2></div>
-      <textarea
-        v-model="ddlText"
-        class="ddl-text"
-        placeholder="CREATE TABLE `user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64) COMMENT '姓名',\n  ...\n) ENGINE=InnoDB COMMENT='用户表';"
-      ></textarea>
+      <div class="panel-head">
+        <h2>粘贴 CREATE TABLE，离线生成 Mapping</h2>
+      </div>
+      <textarea v-model="ddlText" class="ddl-text"
+        placeholder="CREATE TABLE `user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64) COMMENT '姓名',\n  ...\n) ENGINE=InnoDB COMMENT='用户表';"></textarea>
       <div class="row-end">
         <span class="muted">{{ parseInfo }}</span>
         <button class="btn primary" @click="parseDdl">解析并生成</button>
@@ -378,15 +380,11 @@ function short(df: string): string {
             <tbody>
               <tr v-for="f in fields" :key="f.column">
                 <td class="col-col">
-                  <span
-                    v-if="meta.columns.find((c) => c.name === f.column)?.primaryKey"
-                    class="pk-badge"
-                    >PK</span
-                  >
+                  <span v-if="meta.columns.find((c) => c.name === f.column)?.primaryKey" class="pk-badge">PK</span>
                   <b>{{ f.column }}</b>
                 </td>
                 <td class="mono raw">
-                  {{ meta.columns.find((c) => c.name === f.column)?.rawType || '-' }}
+                  {{meta.columns.find((c) => c.name === f.column)?.rawType || '-'}}
                 </td>
                 <td>
                   <select v-model="f.esType" class="es-type" @change="fieldTypeChanged(f)">
@@ -426,12 +424,8 @@ function short(df: string): string {
           </table>
         </div>
         <div v-if="issues.length" class="issues">
-          <div
-            v-for="(it, idx) in issues"
-            :key="idx"
-            class="issue"
-            :class="it.level === 'error' ? 'issue-err' : 'issue-warn'"
-          >
+          <div v-for="(it, idx) in issues" :key="idx" class="issue"
+            :class="it.level === 'error' ? 'issue-err' : 'issue-warn'">
             <b>{{ it.level === 'error' ? '✕' : '⚠' }}</b>
             <span class="mono">{{ it.field }}</span> · {{ it.message }}
           </div>
@@ -457,9 +451,7 @@ function short(df: string): string {
         </div>
         <div class="muted">防覆盖保护：创建前自动校验，索引已存在时需二次确认。</div>
         <div class="es-badges">
-          <span v-if="esCfg" class="badge badge-es"
-            >目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }})</span
-          >
+          <span v-if="esCfg" class="badge badge-es">目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }})</span>
           <span v-if="indexName" :class="indexExists ? 'badge badge-ok' : 'badge badge-muted'">
             {{ indexExists ? '索引已存在' : '索引不存在' }}
           </span>
@@ -475,9 +467,7 @@ function short(df: string): string {
         <div v-else class="tpl-list">
           <div v-for="t in templates" :key="t.id" class="tpl-item">
             <span class="tpl-name">{{ t.name }}</span>
-            <span class="muted"
-              >{{ t.fields.length }} 字段 · {{ new Date(t.createdAt).toLocaleDateString() }}</span
-            >
+            <span class="muted">{{ t.fields.length }} 字段 · {{ new Date(t.createdAt).toLocaleDateString() }}</span>
             <span class="tpl-ops">
               <button class="btn ghost" @click="applyTemplate(t.id)">应用</button>
               <button class="btn danger-ghost" @click="removeTemplate(t.id)">删除</button>
@@ -577,7 +567,7 @@ function short(df: string): string {
   color: var(--es-text);
 }
 
-.btn + .btn {
+.btn+.btn {
   margin-left: 6px;
 }
 

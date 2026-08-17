@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, toRaw } from 'vue'
 
 const emit = defineEmits<{ (e: 'go', view: string): void }>()
+
+function serialize<T>(value: T): T {
+  if (value === null || value === undefined) return value
+  return JSON.parse(JSON.stringify(toRaw(value))) as T
+}
 
 const stats = ref({ dbs: 0, es: 0, tasks: 0, running: 0 })
 const version = ref('')
@@ -21,7 +26,7 @@ onMounted(async () => {
     const esSrc = srcs.find((s) => s.kind === 'es')
     if (esSrc?.es) {
       try {
-        const info = await window.api.es.test(esSrc.es)
+        const info = await window.api.es.test(serialize(esSrc.es))
         esVersion.value = `ES ${info.version} · ${info.cluster}`
       } catch {
         esVersion.value = 'ES 未连接'

@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, toRaw } from 'vue'
 import type { DbConfig, EsConfig, SyncTask } from '../lib/core'
 import { uid } from '../lib/core'
+
+function serialize<T>(value: T): T {
+  if (value === null || value === undefined) return value
+  return JSON.parse(JSON.stringify(toRaw(value))) as T
+}
 
 const emit = defineEmits<{ (e: 'snack', text: string, type?: string): void }>()
 
@@ -96,7 +101,7 @@ async function onDbSourceChange(): Promise<void> {
   treeData.databases = []
   treeData.tables.clear()
   try {
-    const res = await window.api.datasource.tree(cfg)
+    const res = await window.api.datasource.tree(serialize(cfg))
     treeData.databases = res.databases
     for (const branch of res.trees) {
       treeData.tables.set(
@@ -114,7 +119,7 @@ async function onTableChange(): Promise<void> {
   const cfg = dbSources.value.find((s) => s.id === form.dbSourceId)
   if (!cfg) return
   try {
-    const meta = await window.api.datasource.structure(cfg, form.database, form.table)
+    const meta = await window.api.datasource.structure(serialize(cfg), form.database, form.table)
     form.primaryKey = meta.primaryKey || ''
     if (!form.esIndex) form.esIndex = meta.table
     emit(
@@ -168,7 +173,7 @@ async function saveTask(): Promise<void> {
     createdAt: now
   }
   try {
-    await window.api.sync.save(task)
+    await window.api.sync.save(serialize(task))
     emit('snack', '任务已保存，点击「开始」运行', 'success')
     showForm.value = false
     await refreshAll()
@@ -231,7 +236,9 @@ function esName(id: string): string {
     </header>
 
     <section v-if="showForm" class="panel">
-      <div class="panel-head"><h2>新建同步任务</h2></div>
+      <div class="panel-head">
+        <h2>新建同步任务</h2>
+      </div>
       <div class="form-grid">
         <label>
           任务名称
@@ -321,33 +328,17 @@ function esName(id: string): string {
               {{ esName(t.esSourceId) }} / {{ t.esIndex }}
             </div>
             <div class="task-stats">
-              <span
-                >已同步 <b>{{ fmt(t.stats.processed) }}</b></span
-              >
-              <span
-                >总数 <b>{{ fmt(t.stats.total) }}</b></span
-              >
+              <span>已同步 <b>{{ fmt(t.stats.processed) }}</b></span>
+              <span>总数 <b>{{ fmt(t.stats.total) }}</b></span>
               <span class="bar">
-                <i
-                  :style="{ width: pct(t) === '进行中' ? '50%' : pct(t) === '—' ? '0%' : pct(t) }"
-                ></i>
+                <i :style="{ width: pct(t) === '进行中' ? '50%' : pct(t) === '—' ? '0%' : pct(t) }"></i>
               </span>
-              <span
-                >进度 <b>{{ pct(t) }}</b></span
-              >
+              <span>进度 <b>{{ pct(t) }}</b></span>
               <span class="sep">｜</span>
-              <span
-                >插入 <b class="up">{{ fmt(t.stats.inserted) }}</b></span
-              >
-              <span
-                >更新 <b class="up">{{ fmt(t.stats.updated) }}</b></span
-              >
-              <span
-                >删除 <b class="del">{{ fmt(t.stats.deleted) }}</b></span
-              >
-              <span
-                >失败 <b :class="{ del: t.stats.failed > 0 }">{{ fmt(t.stats.failed) }}</b></span
-              >
+              <span>插入 <b class="up">{{ fmt(t.stats.inserted) }}</b></span>
+              <span>更新 <b class="up">{{ fmt(t.stats.updated) }}</b></span>
+              <span>删除 <b class="del">{{ fmt(t.stats.deleted) }}</b></span>
+              <span>失败 <b :class="{ del: t.stats.failed > 0 }">{{ fmt(t.stats.failed) }}</b></span>
             </div>
             <div v-if="t.stats.lastError" class="task-error">⚠ {{ t.stats.lastError }}</div>
           </div>
@@ -456,7 +447,7 @@ select {
   color: var(--es-text);
 }
 
-.btn + .btn {
+.btn+.btn {
   margin-left: 6px;
 }
 
