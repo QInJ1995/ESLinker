@@ -1,7 +1,21 @@
 import { Client } from '@elastic/elasticsearch'
-import { EsConfig, MappingDocument } from './types'
+import { Transport } from '@elastic/transport'
+import { EsConfig, EsVersion, MappingDocument } from './types'
 import { dialog, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
+
+/**
+ * Transport that skips the `x-elastic-product` guarantee check.
+ * ES 6/7 do not send the header, so the default v8/9 client would reject them.
+ * Dropping the check keeps the REST client usable across ES 6.8+ / 7.x / 8.x.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+class CompatibleTransport extends (Transport as any) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(opts: any) {
+    super({ ...opts, productCheck: null })
+  }
+}
 
 export function buildClient(cfg: EsConfig): Client {
   const protocol = cfg.secure ? 'https' : 'http'
@@ -15,7 +29,8 @@ export function buildClient(cfg: EsConfig): Client {
   return new Client({
     node,
     ...(auth as { auth: { username: string; password: string } | { apiKey: string } }),
-    requestTimeout: 30000
+    requestTimeout: 30000,
+    Transport: CompatibleTransport as never
   })
 }
 
@@ -35,6 +50,12 @@ export async function esIndexExists(cfg: EsConfig, index: string): Promise<boole
   return client.indices.exists({ index })
 }
 
+/** Wrap/unwrap mapping body for ES 6.x (single mapping type `_doc`). */
+export function mappingBody(mappings: unknown, version: EsVersion): unknown {
+  if (version === '6') return { _doc: mappings }
+  return mappings
+}
+
 export async function esCreateIndex(
   cfg: EsConfig,
   index: string,
@@ -50,7 +71,7 @@ export async function esCreateIndex(
   await client.indices.create({
     index,
     settings: doc.settings as never,
-    mappings: doc.mappings as never
+    mappings: mappingBody(doc.mappings as never, cfg.version) as never
   })
   return { created: true, existed: exists }
 }
@@ -64,7 +85,7 @@ export async function esCreateIndexForce(
   await client.indices.create({
     index,
     settings: doc.settings as never,
-    mappings: doc.mappings as never
+    mappings: mappingBody(doc.mappings as never, cfg.version) as never
   })
   return true
 }
@@ -75,6 +96,12 @@ export async function esUpdateMapping(
   properties: Record<string, unknown>
 ): Promise<void> {
   const client = buildClient(cfg)
+  if (cfg.version === '6') {
+    const path = `/${encodeURIComponent(index)}/_mapping/_doc`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (client.transport as any).request({ method: 'PUT', path, body: { properties } })
+    return
+  }
   await client.indices.putMapping({ index, properties: properties as never })
 }
 
@@ -92,12 +119,13 @@ export async function esBulkWrite(
 ): Promise<{ ok: number; failed: number; error?: string }> {
   const client = buildClient(cfg)
   const operations: unknown[] = []
+  const metaType = cfg.version === '6' ? { _type: '_doc' } : {}
   for (const doc of docs) {
     const id = doc[primaryKey]
     if (options.action === 'delete') {
-      operations.push({ delete: { _index: index, _id: String(id) } })
+      operations.push({ delete: { _index: index, _id: String(id), ...metaType } })
     } else {
-      operations.push({ index: { _index: index, _id: String(id) } })
+      operations.push({ index: { _index: index, _id: String(id), ...metaType } })
       operations.push(cleanDoc(doc))
     }
   }
@@ -154,7 +182,50 @@ export async function esIndexMapping(
 ): Promise<Record<string, unknown>> {
   const client = buildClient(cfg)
   const res = await client.indices.getMapping({ index })
-  return res as unknown as Record<string, unknown>
+  const body = res as unknown as Record<string, unknown>
+  // unwrap ES6 `_doc` type
+  const indexBody = body[index] as Record<string, unknown> | undefined
+  const mappings = indexBody?.mappings as Record<string, unknown> | undefined
+  if (mappings && typeof mappings === 'object' && !('properties' in mappings)) {
+    const inner = (mappings._doc ?? mappings.doc) as Record<string, unknown> | undefined
+    if (inner) {
+      body[index] = { ...(indexBody as object), mappings: inner } as Record<string, unknown>
+    }
+  }
+  return body
+}
+
+export async function esCount(cfg: EsConfig, index: string): Promise<number> {
+  const client = buildClient(cfg)
+  const res = await client.count({ index })
+  return res.count ?? 0
+}
+
+/**
+ * Fetch documents by `_id`. Uses `_mget` which works without a mapping type on
+ * ES 6.8+ (type is optional at the `/_mget` endpoint) as well as 7.x/8.x.
+ */
+export async function esMget(
+  cfg: EsConfig,
+  index: string,
+  ids: string[]
+): Promise<Array<{ _id: string; found: boolean; source: Record<string, unknown> | null }>> {
+  const client = buildClient(cfg)
+  const res = await client.mget({ index, ids })
+  const docs = res.docs || []
+  return docs.map((d) => {
+    const hit = d as {
+      _id?: string
+      found?: boolean
+      _source?: Record<string, unknown>
+      error?: unknown
+    }
+    return {
+      _id: String(hit._id ?? ''),
+      found: Boolean(hit.found) && !hit.error,
+      source: hit._source ?? null
+    }
+  })
 }
 
 export async function exportMappingJson(

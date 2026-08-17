@@ -19,7 +19,9 @@ import {
   validateMapping
 } from './mapping'
 import { syncManager } from './sync/manager'
+import { runCompare } from './compare'
 import {
+  CompareRequest,
   DataSourceItem,
   DbConfig,
   EsConfig,
@@ -198,6 +200,17 @@ export function registerIpc(): void {
   ipcMain.handle('settings:set', (_e, settings: Settings) => {
     appStore.setSettings(settings)
     return true
+  })
+
+  // ---------- 数据对比校验 ----------
+  ipcMain.handle('compare:run', async (_e, req: CompareRequest) => {
+    const db = { ...req.db }
+    const storedDb = appStore.getDbConfig(db.id)
+    if ((!db.password || db.password === '__MASKED__') && storedDb) db.password = storedDb.password
+    const es = { ...req.es }
+    const storedEs = appStore.getEsConfig(es.id)
+    if ((!es.password || es.password === '__MASKED__') && storedEs) es.password = storedEs.password
+    return runCompare({ ...req, db, es })
   })
 
   ipcMain.handle('log:read', (_e, taskId: string) => appStore.readLog(taskId))

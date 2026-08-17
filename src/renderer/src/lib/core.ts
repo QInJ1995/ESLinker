@@ -16,7 +16,9 @@ export type {
   EsVersion,
   SyncMode,
   SyncStatus,
-  SyncPhase
+  SyncPhase,
+  CompareRequest,
+  CompareResult
 } from '../../../main/lib/types'
 
 import type { Settings } from '../../../main/lib/types'

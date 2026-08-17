@@ -1,5 +1,3 @@
-@import './base.css';
-
 *,
 *::before,
 *::after {
@@ -16,6 +14,19 @@ body,
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
   font-size: 14px;
+}
+
+body {
+  background: #f5f6f8;
+  color: #1f2430;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+html.dark body {
+  background: #101014;
+  color: #cfd2d9;
 }
 
 input,
@@ -35,6 +46,42 @@ button {
   border-radius: 6px;
 }
 
+html.dark ::-webkit-scrollbar-thumb {
+  background: #3a3f4b;
+}
+
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 通用页面头部 */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.page-sub {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  opacity: 0.65;
+}
+
+.mono {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.stat-number {
+  font-size: 30px;
+  font-weight: 700;
 }

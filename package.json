@@ -22,12 +22,14 @@
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.15.0",
+    "@elastic/transport": "^8.9.6",
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "electron-store": "^8.2.0",
     "mssql": "^11.0.1",
     "mysql-events": "^0.0.11",
     "mysql2": "^3.23.3",
+    "naive-ui": "^2.45.0",
     "pg": "^8.23.0"
   },
   "devDependencies": {

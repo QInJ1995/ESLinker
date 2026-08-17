@@ -1,9 +1,25 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, h } from 'vue'
+import {
+  NButton,
+  NSpace,
+  NInput,
+  NInputNumber,
+  NSelect,
+  NTag,
+  NProgress,
+  NEmpty,
+  NCard,
+  NDataTable,
+  NModal,
+  NForm,
+  NFormItem,
+  NGrid,
+  NGridItem
+} from 'naive-ui'
 import type { DbConfig, EsConfig, SyncTask } from '../lib/core'
 import { uid, serialize } from '../lib/core'
-
-const emit = defineEmits<{ (e: 'snack', text: string, type?: string): void }>()
+import { message, confirmDanger } from '../lib/naive'
 
 const tasks = ref<SyncTask[]>([])
 const running = reactive(new Set<string>())
@@ -36,6 +52,19 @@ const logText = ref('')
 
 let unsubscribe: (() => void) | null = null
 
+const dbSourceOptions = computed(() => dbSources.value.map((s) => ({ label: s.name, value: s.id })))
+const esSourceOptions = computed(() => esSources.value.map((s) => ({ label: s.name, value: s.id })))
+const dbOptions = computed(() => treeData.databases.map((d) => ({ label: d, value: d })))
+const tableOptions = computed(() =>
+  (treeData.tables.get(form.database) || []).map((t) => ({ label: t, value: t }))
+)
+
+const modeOptions = [
+  { label: '全量同步', value: 'full' },
+  { label: '增量同步（Binlog）', value: 'incremental' },
+  { label: '先全量后增量', value: 'full_then_incremental' }
+]
+
 onMounted(async () => {
   unsubscribe = window.api.sync.onEvent((p) => {
     const t = tasks.value.find((x) => x.id === p.taskId)
@@ -65,7 +94,7 @@ async function refreshAll(): Promise<void> {
       if (t.status === 'running' || t.status === 'paused') running.add(t.id)
     }
   } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
+    message.error(String((e as Error).message))
   }
 }
 
@@ -105,7 +134,7 @@ async function onDbSourceChange(): Promise<void> {
       )
     }
   } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
+    message.error(String((e as Error).message))
   }
 }
 
@@ -117,23 +146,20 @@ async function onTableChange(): Promise<void> {
     const meta = await window.api.datasource.structure(serialize(cfg), form.database, form.table)
     form.primaryKey = meta.primaryKey || ''
     if (!form.esIndex) form.esIndex = meta.table
-    emit(
-      'snack',
-      `主键：${meta.primaryKey || '未检测到（增量同步需要主键）'}`,
-      meta.primaryKey ? 'success' : 'error'
-    )
+    if (meta.primaryKey) message.success(`主键：${meta.primaryKey}`)
+    else message.error('未检测到主键（增量同步需要主键）')
   } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
+    message.error(String((e as Error).message))
   }
 }
 
 async function saveTask(): Promise<void> {
   if (!form.name || !form.dbSourceId || !form.database || !form.table || !form.esSourceId) {
-    emit('snack', '请完整填写任务信息', 'error')
+    message.error('请完整填写任务信息')
     return
   }
   if (!form.primaryKey) {
-    emit('snack', '该表未检测到主键，无法进行同步', 'error')
+    message.error('该表未检测到主键，无法进行同步')
     return
   }
   const now = new Date().toISOString()
@@ -169,26 +195,28 @@ async function saveTask(): Promise<void> {
   }
   try {
     await window.api.sync.save(serialize(task))
-    emit('snack', '任务已保存，点击「开始」运行', 'success')
+    message.success('任务已保存，点击「开始」运行')
     showForm.value = false
     await refreshAll()
   } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
+    message.error(String((e as Error).message))
   }
 }
 
-async function removeTask(t: SyncTask): Promise<void> {
-  if (!window.confirm(`删除任务「${t.name}」？`)) return
-  try {
-    await window.api.sync.remove(t.id)
-    await refreshAll()
-  } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
-  }
+function removeTask(t: SyncTask): void {
+  confirmDanger(`删除任务「${t.name}」？`, async () => {
+    try {
+      await window.api.sync.remove(t.id)
+      await refreshAll()
+      message.success('已删除')
+    } catch (e) {
+      message.error(String((e as Error).message))
+    }
+  })
 }
 
 function action(taskId: string, op: 'start' | 'pause' | 'resume' | 'stop' | 'restart'): void {
-  void window.api.sync[op](taskId).catch((e: Error) => emit('snack', String(e.message), 'error'))
+  void window.api.sync[op](taskId).catch((e: Error) => message.error(String(e.message)))
 }
 
 async function viewLog(taskId: string): Promise<void> {
@@ -196,22 +224,31 @@ async function viewLog(taskId: string): Promise<void> {
   logText.value = (await window.api.log.read(taskId)) || '（暂无日志）'
 }
 
-function statusBadgeClass(s: string): string {
-  if (s === 'running') return 'badge badge-running'
-  if (s === 'paused') return 'badge badge-paused'
-  if (s === 'finished') return 'badge badge-finished'
-  if (s === 'error') return 'badge badge-error'
-  if (s === 'stopped') return 'badge badge-stopped'
-  return 'badge badge-idle'
+function statusOf(t: SyncTask): string {
+  return t.status === 'paused' ? '已暂停' : t.status
+}
+
+function statusType(s: string): 'success' | 'warning' | 'info' | 'error' | 'default' {
+  if (s === 'running') return 'success'
+  if (s === 'paused') return 'warning'
+  if (s === 'finished') return 'info'
+  if (s === 'error') return 'error'
+  return 'default'
+}
+
+function modeLabel(t: SyncTask): string {
+  if (t.mode === 'full') return '全量'
+  if (t.mode === 'incremental') return '增量'
+  return '全量+增量'
+}
+
+function pct(t: SyncTask): number {
+  if (!t.stats.total) return t.stats.processed ? -1 : 0
+  return Math.min(100, Math.round((t.stats.processed / t.stats.total) * 100))
 }
 
 function fmt(n: number): string {
   return n.toLocaleString()
-}
-
-function pct(t: SyncTask): string {
-  if (!t.stats.total) return t.stats.processed ? '进行中' : '—'
-  return Math.min(100, Math.round((t.stats.processed / t.stats.total) * 100)) + '%'
 }
 
 function srcName(id: string): string {
@@ -221,451 +258,313 @@ function srcName(id: string): string {
 function esName(id: string): string {
   return esSources.value.find((s) => s.id === id)?.name || id.slice(0, 8)
 }
+
+const taskColumns = computed(() => [
+  {
+    title: '任务',
+    key: 'name',
+    minWidth: 230,
+    render: (t: SyncTask) =>
+      h('div', {}, [
+        h('b', {}, t.name),
+        h('div', { class: 'mono route' }, [
+          `${srcName(t.dbSourceId)} → ${t.database}.${t.table}`,
+          h('span', { class: 'arr' }, ' ⟶ '),
+          `${esName(t.esSourceId)} / ${t.esIndex}`
+        ]),
+        t.stats.lastError ? h('div', { class: 'task-error' }, `⚠ ${t.stats.lastError}`) : null
+      ])
+  },
+  {
+    title: '模式',
+    key: 'mode',
+    width: 92,
+    render: (t: SyncTask) =>
+      h(NTag, { size: 'small', type: 'primary', bordered: false }, { default: () => modeLabel(t) })
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 88,
+    render: (t: SyncTask) =>
+      h(
+        NTag,
+        { size: 'small', type: statusType(t.status), bordered: false },
+        { default: () => statusOf(t) }
+      )
+  },
+  {
+    title: '进度',
+    key: 'progress',
+    width: 170,
+    render: (t: SyncTask) => {
+      const p = pct(t)
+      const indefinite = !t.stats.total && t.stats.processed > 0
+      return h(NProgress, {
+        type: 'line',
+        height: 6,
+        percentage: indefinite ? 40 : p,
+        processing: indefinite || t.status === 'running',
+        status: t.status === 'error' ? 'error' : undefined,
+        indicatorPlacement: 'outside'
+      })
+    }
+  },
+  {
+    title: '同步统计',
+    key: 'stats',
+    width: 230,
+    render: (t: SyncTask) =>
+      h('div', { class: 'stats-line' }, [
+        h('span', {}, [`已同步 `, h('b', {}, fmt(t.stats.processed))]),
+        h('span', {}, [`总数 `, h('b', {}, fmt(t.stats.total))]),
+        h('span', {}, [`插入 `, h('b', { class: 'ok' }, fmt(t.stats.inserted))]),
+        h('span', {}, [`更新 `, h('b', { class: 'ok' }, fmt(t.stats.updated))]),
+        h('span', {}, [`删除 `, h('b', { class: 'del' }, fmt(t.stats.deleted))]),
+        h('span', {}, [
+          `失败 `,
+          h('b', { class: t.stats.failed > 0 ? 'del' : '' }, fmt(t.stats.failed))
+        ])
+      ])
+  },
+  {
+    title: '操作',
+    key: 'ops',
+    width: 260,
+    render: (t: SyncTask) => {
+      const isRun = running.has(t.id) && t.status === 'running'
+      const isPaused = running.has(t.id) && t.status === 'paused'
+      return h(
+        NSpace,
+        { size: 4 },
+        {
+          default: () => [
+            isRun
+              ? h(
+                  NButton,
+                  { size: 'small', onClick: () => action(t.id, 'pause') },
+                  { default: () => '暂停' }
+                )
+              : isPaused
+                ? h(
+                    NButton,
+                    { size: 'small', onClick: () => action(t.id, 'resume') },
+                    { default: () => '继续' }
+                  )
+                : h(
+                    NButton,
+                    { size: 'small', type: 'primary', onClick: () => action(t.id, 'start') },
+                    { default: () => '开始' }
+                  ),
+            isRun || isPaused
+              ? h(
+                  NButton,
+                  {
+                    size: 'small',
+                    type: 'error',
+                    quaternary: true,
+                    onClick: () => action(t.id, 'stop')
+                  },
+                  { default: () => '停止' }
+                )
+              : h(
+                  NButton,
+                  { size: 'small', onClick: () => action(t.id, 'restart') },
+                  { default: () => '重启' }
+                ),
+            h(
+              NButton,
+              { size: 'small', quaternary: true, onClick: () => viewLog(t.id) },
+              { default: () => '日志' }
+            ),
+            h(
+              NButton,
+              { size: 'small', type: 'error', quaternary: true, onClick: () => removeTask(t) },
+              { default: () => '删除' }
+            )
+          ]
+        }
+      )
+    }
+  }
+])
 </script>
 
 <template>
   <div class="page">
     <header class="page-head">
-      <h1>同步任务</h1>
-      <button class="btn primary" @click="startCreate">+ 新建任务</button>
+      <div>
+        <h1 class="page-title">同步任务</h1>
+        <p class="page-sub">全量分页批量 + Binlog 实时增量，断点续传</p>
+      </div>
+      <n-button type="primary" size="small" @click="startCreate">+ 新建任务</n-button>
     </header>
 
-    <section v-if="showForm" class="panel">
-      <div class="panel-head">
-        <h2>新建同步任务</h2>
-      </div>
-      <div class="form-grid">
-        <label>
-          任务名称
-          <input v-model="form.name" type="text" placeholder="如：用户表全量+增量" />
-        </label>
-        <label>
-          数据库数据源
-          <select v-model="form.dbSourceId" @change="onDbSourceChange">
-            <option value="" disabled>选择数据库</option>
-            <option v-for="s in dbSources" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-        </label>
-        <label>
-          数据库
-          <select v-model="form.database">
-            <option value="" disabled>选择库</option>
-            <option v-for="d in treeData.databases" :key="d" :value="d">{{ d }}</option>
-          </select>
-        </label>
-        <label>
-          数据表
-          <select v-model="form.table" @change="onTableChange">
-            <option value="" disabled>选择表</option>
-            <option v-for="t in treeData.tables.get(form.database) || []" :key="t" :value="t">
-              {{ t }}
-            </option>
-          </select>
-        </label>
-        <label>
-          ES 数据源
-          <select v-model="form.esSourceId">
-            <option value="" disabled>选择 ES</option>
-            <option v-for="s in esSources" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-        </label>
-        <label>
-          目标索引
-          <input v-model="form.esIndex" type="text" />
-        </label>
-        <label>
-          主键字段
-          <input v-model="form.primaryKey" type="text" />
-        </label>
-        <label>
-          同步模式
-          <select v-model="form.mode">
-            <option value="full">全量同步</option>
-            <option value="incremental">增量同步（Binlog）</option>
-            <option value="full_then_incremental">先全量后增量</option>
-          </select>
-        </label>
-        <label>
-          批次大小
-          <input v-model.number="form.batchSize" type="number" min="100" />
-        </label>
-        <label>
-          并发数
-          <input v-model.number="form.concurrency" type="number" min="1" max="8" />
-        </label>
-      </div>
-      <div class="row-end">
-        <button class="btn" @click="showForm = false">取消</button>
-        <button class="btn primary" @click="saveTask">保存任务</button>
-      </div>
-    </section>
+    <n-card v-if="showForm" class="panel-card">
+      <template #header>新建同步任务</template>
+      <n-form label-placement="top" :show-feedback="false">
+        <n-grid :cols="4" :x-gap="14" :y-gap="0" responsive="screen" item-responsive>
+          <n-grid-item>
+            <n-form-item label="任务名称">
+              <n-input v-model:value="form.name" placeholder="如：用户表全量+增量" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="数据库数据源">
+              <n-select
+                v-model:value="form.dbSourceId"
+                placeholder="选择数据库"
+                :options="dbSourceOptions"
+                :on-update:value="onDbSourceChange"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="数据库">
+              <n-select
+                v-model:value="form.database"
+                placeholder="选择库"
+                :options="dbOptions"
+                :disabled="!form.dbSourceId"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="数据表">
+              <n-select
+                v-model:value="form.table"
+                placeholder="选择表"
+                :options="tableOptions"
+                :disabled="!form.database"
+                :on-update:value="onTableChange"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="ES 数据源">
+              <n-select
+                v-model:value="form.esSourceId"
+                placeholder="选择 ES"
+                :options="esSourceOptions"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="目标索引">
+              <n-input v-model:value="form.esIndex" placeholder="将自动填入表名" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="主键字段">
+              <n-input v-model:value="form.primaryKey" placeholder="选择表后自动检测" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="同步模式">
+              <n-select v-model:value="form.mode" :options="modeOptions" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="批次大小"
+              ><n-input-number
+                v-model:value="form.batchSize"
+                :min="100"
+                :step="100"
+                style="width: 100%"
+            /></n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="并发数"
+              ><n-input-number
+                v-model:value="form.concurrency"
+                :min="1"
+                :max="8"
+                style="width: 100%"
+            /></n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label=" ">
+              <n-space>
+                <n-button @click="showForm = false">取消</n-button>
+                <n-button type="primary" @click="saveTask">保存任务</n-button>
+              </n-space>
+            </n-form-item>
+          </n-grid-item>
+        </n-grid>
+      </n-form>
+    </n-card>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>任务列表（{{ tasks.length }}）</h2>
-      </div>
-      <div v-if="tasks.length === 0" class="empty">暂无任务，点击「新建任务」创建</div>
-      <div v-else class="task-list">
-        <div v-for="t in tasks" :key="t.id" class="task-card">
-          <div class="task-main">
-            <div class="task-title">
-              <b>{{ t.name }}</b>
-              <span :class="statusBadgeClass(t.status)">{{
-                t.status === 'paused' ? '已暂停' : t.status
-              }}</span>
-              <span class="badge badge-mode">{{
-                t.mode === 'full' ? '全量' : t.mode === 'incremental' ? '增量' : '全量+增量'
-              }}</span>
-            </div>
-            <div class="task-route mono">
-              {{ srcName(t.dbSourceId) }} → {{ t.database }}.{{ t.table }}
-              <span class="arr">⟶</span>
-              {{ esName(t.esSourceId) }} / {{ t.esIndex }}
-            </div>
-            <div class="task-stats">
-              <span
-                >已同步 <b>{{ fmt(t.stats.processed) }}</b></span
-              >
-              <span
-                >总数 <b>{{ fmt(t.stats.total) }}</b></span
-              >
-              <span class="bar">
-                <i
-                  :style="{ width: pct(t) === '进行中' ? '50%' : pct(t) === '—' ? '0%' : pct(t) }"
-                ></i>
-              </span>
-              <span
-                >进度 <b>{{ pct(t) }}</b></span
-              >
-              <span class="sep">｜</span>
-              <span
-                >插入 <b class="up">{{ fmt(t.stats.inserted) }}</b></span
-              >
-              <span
-                >更新 <b class="up">{{ fmt(t.stats.updated) }}</b></span
-              >
-              <span
-                >删除 <b class="del">{{ fmt(t.stats.deleted) }}</b></span
-              >
-              <span
-                >失败 <b :class="{ del: t.stats.failed > 0 }">{{ fmt(t.stats.failed) }}</b></span
-              >
-            </div>
-            <div v-if="t.stats.lastError" class="task-error">⚠ {{ t.stats.lastError }}</div>
-          </div>
-          <div class="task-ops">
-            <template v-if="running.has(t.id) && t.status === 'running'">
-              <button class="btn" @click="action(t.id, 'pause')">暂停</button>
-              <button class="btn danger-ghost" @click="action(t.id, 'stop')">停止</button>
-            </template>
-            <template v-else-if="running.has(t.id) && t.status === 'paused'">
-              <button class="btn" @click="action(t.id, 'resume')">继续</button>
-              <button class="btn danger-ghost" @click="action(t.id, 'stop')">停止</button>
-            </template>
-            <template v-else>
-              <button class="btn primary" @click="action(t.id, 'start')">开始</button>
-              <button class="btn" @click="action(t.id, 'restart')">重启</button>
-            </template>
-            <button class="btn" @click="viewLog(t.id)">日志</button>
-            <button class="btn danger-ghost" @click="removeTask(t)">删除</button>
-          </div>
-        </div>
-      </div>
-    </section>
+    <n-card class="panel-card">
+      <template #header>任务列表（{{ tasks.length }}）</template>
+      <n-data-table
+        v-if="tasks.length"
+        :columns="taskColumns"
+        :data="tasks"
+        :bordered="false"
+        size="small"
+      />
+      <n-empty v-else description="暂无任务，点击「新建任务」创建" style="padding: 26px 0" />
+    </n-card>
 
-    <div v-if="logTaskId" class="modal-mask" @click.self="logTaskId = null">
-      <div class="modal wide">
-        <div class="modal-head">
-          <h3>任务日志</h3>
-          <button class="btn ghost" @click="logTaskId = null">✕</button>
+    <n-modal
+      v-model:show="logTaskId"
+      preset="card"
+      title="任务日志"
+      style="width: 720px; max-width: 92vw"
+    >
+      <pre class="log-pre">{{ logText }}</pre>
+      <template #footer>
+        <div class="modal-foot">
+          <n-button type="primary" @click="logTaskId = null">关闭</n-button>
         </div>
-        <div class="modal-body">
-          <pre class="log-pre">{{ logText }}</pre>
-        </div>
-      </div>
-    </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <style scoped>
 .page {
-  max-width: 1180px;
+  max-width: 1200px;
 }
 
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 18px;
+.panel-card {
+  margin-bottom: 16px;
 }
 
-.page-head h1 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.panel {
-  background: var(--es-panel);
-  border: 1px solid var(--es-border);
-  border-radius: 12px;
-  padding: 16px 18px;
-  margin-bottom: 18px;
-}
-
-.panel-head h2 {
-  margin: 0 0 12px;
-  font-size: 15px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--es-text-2);
-}
-
-input,
-select {
-  padding: 8px 10px;
-  border: 1px solid var(--es-border);
-  border-radius: 7px;
-  font-size: 13px;
-  background: #fff;
-  color: var(--es-text);
-}
-
-.row-end {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.btn {
-  padding: 6px 12px;
-  border: 1px solid var(--es-border);
-  background: #fff;
-  border-radius: 7px;
-  font-size: 12.5px;
-  cursor: pointer;
-  color: var(--es-text);
-}
-
-.btn + .btn {
-  margin-left: 6px;
-}
-
-.btn.primary {
-  background: var(--es-primary);
-  border-color: var(--es-primary);
-  color: #fff;
-}
-
-.btn.danger-ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--es-danger);
-}
-
-.btn.danger-ghost:hover {
-  background: #fee2e2;
-}
-
-.empty {
-  padding: 26px;
-  text-align: center;
-  color: var(--es-text-3);
-}
-
-.task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.task-card {
-  border: 1px solid var(--es-border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.task-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.task-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.task-title b {
-  font-size: 14px;
-}
-
-.badge {
-  padding: 2px 9px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.badge-running {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.badge-paused {
-  background: #fef9c3;
-  color: #a16207;
-}
-
-.badge-finished {
-  background: #e0f2fe;
-  color: #0369a1;
-}
-
-.badge-error {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.badge-stopped {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.badge-idle {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-.badge-mode {
-  background: #eef2ff;
-  color: #4338ca;
-}
-
-.task-route {
-  margin-top: 6px;
-  color: var(--es-text-2);
-  font-size: 12.5px;
+.route {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 4px;
 }
 
 .arr {
-  margin: 0 6px;
-  color: var(--es-text-3);
-}
-
-.task-stats {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 12px;
-  color: var(--es-text-2);
-  flex-wrap: wrap;
-}
-
-.task-stats b {
-  color: var(--es-text);
-}
-
-.up {
-  color: #15803d;
-}
-
-.del {
-  color: #b91c1c;
-}
-
-.bar {
-  display: inline-block;
-  width: 120px;
-  height: 7px;
-  background: #e8ebf0;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.bar i {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #2563eb, #38bdf8);
-  border-radius: 6px;
-}
-
-.sep {
-  color: var(--es-border);
+  color: #999;
 }
 
 .task-error {
-  margin-top: 6px;
-  color: #b91c1c;
+  margin-top: 5px;
   font-size: 12px;
-  background: #fef2f2;
-  border-radius: 6px;
-  padding: 5px 8px;
+  color: #d03050;
 }
 
-.task-ops {
+.stats-line {
   display: flex;
-  align-items: center;
-  flex-shrink: 0;
+  gap: 10px;
+  font-size: 12px;
+  opacity: 0.85;
+  flex-wrap: wrap;
 }
 
-.mono {
-  font-family: ui-monospace, Menlo, monospace;
+.stats-line b {
+  font-weight: 600;
 }
 
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
+.ok {
+  color: #18a058;
 }
 
-.modal {
-  background: #fff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-  max-width: 92vw;
-}
-
-.modal.wide {
-  width: 720px;
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--es-border);
-}
-
-.modal-head h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.modal-body {
-  padding: 14px 18px;
+.del {
+  color: #d03050;
 }
 
 .log-pre {
@@ -674,9 +573,14 @@ select {
   padding: 14px;
   border-radius: 8px;
   font-size: 12px;
-  max-height: 420px;
+  max-height: 60vh;
   overflow: auto;
   white-space: pre-wrap;
   font-family: ui-monospace, Menlo, monospace;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

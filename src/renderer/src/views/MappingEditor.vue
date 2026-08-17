@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, h } from 'vue'
+import {
+  NButton,
+  NSpace,
+  NInput,
+  NInputNumber,
+  NSelect,
+  NSwitch,
+  NCheckbox,
+  NTag,
+  NAlert,
+  NEmpty,
+  NDataTable
+} from 'naive-ui'
 import type {
   DbConfig,
   EsConfig,
@@ -16,18 +29,17 @@ import {
   uid,
   serialize
 } from '../lib/core'
+import { message, confirmDanger } from '../lib/naive'
 
 const props = defineProps<{
   tableContext: { cfg: DbConfig; database: string; table: string } | null
 }>()
-const emit = defineEmits<{ (e: 'snack', text: string, type?: string): void }>()
 
 const mode = ref<'table' | 'ddl'>('table')
 const loading = ref(false)
 const meta = ref<TableMeta | null>(null)
 const fields = ref<MappingField[]>([])
 const settings = reactive({ ...DEFAULT_SETTINGS })
-const settingsLoaded = ref(false)
 
 const esSources = ref<EsConfig[]>([])
 const esSourceId = ref('')
@@ -48,6 +60,7 @@ const parseInfo = ref('')
 // ---------- 自定义字段 / 导入字段 ----------
 const CUSTOM_FIELD_PREFIX = 'custom_'
 const IMPORTED_FIELD_PREFIX = 'imported_'
+const IMPORTED_FIELD_BADGE = '导入'
 
 function isCustomField(column: string): boolean {
   return column.startsWith(CUSTOM_FIELD_PREFIX)
@@ -72,18 +85,16 @@ function addCustomField(): void {
   }
   allFieldsSnapshot.value.push(newField)
   fields.value.push(JSON.parse(JSON.stringify(newField)))
+  gridVersion.value++
   void schedulePreview()
 }
 
 function removeCustomField(column: string): void {
   const snapIdx = allFieldsSnapshot.value.findIndex((f) => f.column === column)
-  if (snapIdx >= 0) {
-    allFieldsSnapshot.value.splice(snapIdx, 1)
-  }
+  if (snapIdx >= 0) allFieldsSnapshot.value.splice(snapIdx, 1)
   const fieldIdx = fields.value.findIndex((f) => f.column === column)
-  if (fieldIdx >= 0) {
-    fields.value.splice(fieldIdx, 1)
-  }
+  if (fieldIdx >= 0) fields.value.splice(fieldIdx, 1)
+  gridVersion.value++
   void schedulePreview()
 }
 
@@ -110,8 +121,8 @@ function resetImportedField(f: MappingField): void {
 }
 
 // ---------- 字段选择（表格最左列，控制是否加入 Mapping） ----------
-// 全量字段快照：永远保存表结构所有列，方便用户「加回」之前取消的列
 const allFieldsSnapshot = ref<MappingField[]>([])
+const gridVersion = ref(0)
 
 const allIncluded = computed(() => {
   const dbFields = allFieldsSnapshot.value.filter((f) => !isCustomField(f.column))
@@ -132,11 +143,8 @@ function toggleInclude(column: string): void {
   } else {
     const snap = allFieldsSnapshot.value.find((f) => f.column === column)
     if (!snap) return
-    // 插入到与 snapshot 相同的顺序位置
     const order = allFieldsSnapshot.value.map((f) => f.column)
     const copy: MappingField = JSON.parse(JSON.stringify(snap))
-    // 如果用户之前改过这个字段（在 template/full snapshot 中没记录），这里取 snapshot 的初始化值
-    // 我们需要从全量快照的顺序找插入点
     const insertAt = order.indexOf(column)
     const fieldsOrder = fields.value.map((f) => order.indexOf(f.column))
     let pos = fields.value.length
@@ -148,26 +156,23 @@ function toggleInclude(column: string): void {
     }
     fields.value.splice(pos, 0, copy)
   }
+  gridVersion.value++
   void schedulePreview()
 }
 
 function toggleIncludeAll(): void {
-  // 自定义字段始终保留
   const customFields = fields.value.filter((f) => isCustomField(f.column))
   const customFieldsInSnapshot = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
 
   if (allIncluded.value) {
-    // 全部取消（只取消库字段和导入字段，保留自定义字段）
     fields.value = [...customFields]
   } else {
-    // 全选：恢复快照里的所有列（库字段+导入字段），保留用户已修改过的字段，同时保留自定义字段
     const currentMap = new Map(fields.value.map((f) => [f.column, f]))
     const order = allFieldsSnapshot.value.map((f) => f.column)
     const dbSnapshots = allFieldsSnapshot.value.filter((f) => !isCustomField(f.column))
     const nextDbFields: MappingField[] = dbSnapshots.map((snap) => {
       const cur = currentMap.get(snap.column)
-      const base: MappingField = cur ? cur : JSON.parse(JSON.stringify(snap))
-      return base
+      return cur ? cur : JSON.parse(JSON.stringify(snap))
     })
     const mergedCustomFields = customFieldsInSnapshot.map((snap) => {
       const cur = currentMap.get(snap.column)
@@ -177,19 +182,13 @@ function toggleIncludeAll(): void {
     next.sort((a, b) => order.indexOf(a.column) - order.indexOf(b.column))
     fields.value = next
   }
+  gridVersion.value++
   void schedulePreview()
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(async () => {
-  try {
-    const s = await window.api.settings.get()
-    Object.assign(settings, s)
-    settingsLoaded.value = true
-  } catch {
-    Object.assign(settings, DEFAULT_SETTINGS)
-  }
   await loadTemplates()
   await loadEsSources()
 })
@@ -207,6 +206,11 @@ watch(
 
 watch(fields, () => schedulePreview(), { deep: true })
 
+const tableRows = computed(() => {
+  void gridVersion.value
+  return [...allFieldsSnapshot.value]
+})
+
 async function loadEsSources(): Promise<void> {
   try {
     const items = await window.api.datasource.list()
@@ -215,7 +219,7 @@ async function loadEsSources(): Promise<void> {
       esSourceId.value = esSources.value[0].id
     }
   } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
+    message.error(String((e as Error).message))
   }
 }
 
@@ -227,14 +231,12 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
   loading.value = true
   indexExists.value = false
   try {
-    // 只保留现有的自定义字段（imported 字段随表结构替换）
     const customSnapshots = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
     const customMap = new Map(
       fields.value.filter((f) => isCustomField(f.column)).map((f) => [f.column, f])
     )
 
     meta.value = await window.api.datasource.structure(serialize(cfg), database, table)
-    console.log(meta.value)
     if (!indexName.value) indexName.value = table
     const generatedFields = await window.api.mapping.generate(
       serialize(meta.value),
@@ -246,9 +248,10 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
     })
     fields.value = [...generatedFields, ...mergedCustom]
     allFieldsSnapshot.value = [...JSON.parse(JSON.stringify(generatedFields)), ...customSnapshots]
+    gridVersion.value++
     await schedulePreview()
   } catch (e) {
-    emit('snack', `读取表结构失败：${(e as Error).message}`, 'error')
+    message.error(`读取表结构失败：${(e as Error).message}`)
   } finally {
     loading.value = false
   }
@@ -256,7 +259,6 @@ async function loadStructure(cfg: DbConfig, database: string, table: string): Pr
 
 async function regenerate(): Promise<void> {
   if (!meta.value) return
-  // 只保留现有的自定义字段（imported 字段随默认规则重新生成）
   const customSnapshots = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
   const customMap = new Map(
     fields.value.filter((f) => isCustomField(f.column)).map((f) => [f.column, f])
@@ -269,7 +271,8 @@ async function regenerate(): Promise<void> {
   })
   fields.value = [...generatedFields, ...mergedCustom]
   allFieldsSnapshot.value = [...JSON.parse(JSON.stringify(generatedFields)), ...customSnapshots]
-  emit('snack', '已按默认规则重新生成（自定义字段已保留）')
+  gridVersion.value++
+  message.success('已按默认规则重新生成（自定义字段已保留）')
   await schedulePreview()
 }
 
@@ -309,7 +312,7 @@ async function buildDoc(): Promise<void> {
       serialize(fields.value)
     )) as typeof issues.value
   } catch (e) {
-    emit('snack', String((e as Error).message), 'error')
+    message.error(String((e as Error).message))
   }
 }
 
@@ -320,21 +323,19 @@ function openPreview(): void {
 
 async function checkExists(): Promise<void> {
   if (!esCfg.value || !indexName.value) {
-    emit('snack', '请先选择 ES 数据源并填写索引名')
+    message.warning('请先选择 ES 数据源并填写索引名')
     return
   }
   checkingIndex.value = true
   try {
     indexExists.value = await window.api.es.exists(serialize(esCfg.value), indexName.value)
-    emit(
-      'snack',
+    message.success(
       indexExists.value
         ? `索引 ${indexName.value} 已存在`
-        : `索引 ${indexName.value} 不存在，可直接创建`,
-      'success'
+        : `索引 ${indexName.value} 不存在，可直接创建`
     )
   } catch (e) {
-    emit('snack', `检查失败：${(e as Error).message}`, 'error')
+    message.error(`检查失败：${(e as Error).message}`)
   } finally {
     checkingIndex.value = false
   }
@@ -342,47 +343,51 @@ async function checkExists(): Promise<void> {
 
 async function createIndex(): Promise<void> {
   if (!esCfg.value || !indexName.value) {
-    emit('snack', '请先选择 ES 数据源并填写索引名')
+    message.warning('请先选择 ES 数据源并填写索引名')
     return
   }
   await buildDoc()
   if (!doc.value) return
   const errors = issues.value.filter((i) => i.level === 'error')
   if (errors.length > 0) {
-    emit('snack', `Mapping 校验未通过（${errors.length} 个错误），请先修正`, 'error')
+    message.error(`Mapping 校验未通过（${errors.length} 个错误），请先修正`)
     return
   }
-  let overwrite = false
   try {
     const exists = await window.api.es.exists(serialize(esCfg.value), indexName.value)
     if (exists) {
-      if (
-        !window.confirm(
-          `索引「${indexName.value}」已存在。创建将删除并重建索引（原有数据会丢失），是否继续？`
-        )
-      ) {
-        emit('snack', '已取消（防覆盖保护）')
-        return
-      }
-      overwrite = true
+      confirmDanger(
+        `索引「${indexName.value}」已存在。创建将删除并重建索引（原有数据会丢失），是否继续？`,
+        () => {
+          void doCreate(true)
+        },
+        {
+          title: '防覆盖保护',
+          positiveText: '删除并重建',
+          onNegativeClick: () => message.info('已取消（防覆盖保护）')
+        }
+      )
+      return
     }
+    await doCreate(false)
+  } catch (e) {
+    message.error(`创建失败：${(e as Error).message}`)
+  }
+}
+
+async function doCreate(overwrite: boolean): Promise<void> {
+  try {
+    if (!esCfg.value || !indexName.value || !doc.value) return
     const res = (await window.api.es.create(
       serialize(esCfg.value),
       indexName.value,
       serialize(doc.value),
       overwrite
-    )) as {
-      created: boolean
-      existed: boolean
-    }
-    emit(
-      'snack',
-      res.created ? `索引「${indexName.value}」创建成功` : '索引已存在，未覆盖',
-      'success'
-    )
+    )) as { created: boolean; existed: boolean }
+    message.success(res.created ? `索引「${indexName.value}」创建成功` : '索引已存在，未覆盖')
     indexExists.value = true
   } catch (e) {
-    emit('snack', `创建失败：${(e as Error).message}`, 'error')
+    message.error(`创建失败：${(e as Error).message}`)
   }
 }
 
@@ -394,50 +399,79 @@ async function updateMapping(): Promise<void> {
       indexName.value,
       serialize(doc.value.mappings.properties)
     )
-    emit('snack', 'Mapping 已推送更新', 'success')
+    message.success('Mapping 已推送更新')
   } catch (e) {
-    emit('snack', `更新失败：${(e as Error).message}`, 'error')
+    message.error(`更新失败：${(e as Error).message}`)
   }
 }
 
 async function exportJson(): Promise<void> {
-  if (!doc.value || !indexName.value) return
+  if (!indexName.value) return
   await buildDoc()
   if (!doc.value) return
   const path = await window.api.es.export(serialize(doc.value), `${indexName.value}.mapping.json`)
-  emit('snack', path ? `已导出：${path}` : '已取消导出', path ? 'success' : 'info')
+  message.success(path ? `已导出：${path}` : '已取消导出')
+}
+
+// ---------- 模板 ----------
+const tplModal = reactive({ open: false, name: '', description: '', shards: 1, replicas: 0 })
+
+function openSaveTemplate(): void {
+  tplModal.name = ''
+  tplModal.description = ''
+  tplModal.shards = settings.defaultShards
+  tplModal.replicas = settings.defaultReplicas
+  tplModal.open = true
 }
 
 async function saveTemplate(): Promise<void> {
-  const name = window.prompt('模板名称')
-  if (!name) return
+  if (!tplModal.name.trim()) {
+    message.warning('请输入模板名称')
+    return
+  }
   const tpl: MappingTemplate = {
     id: uid(),
-    name,
+    name: tplModal.name.trim(),
+    description: tplModal.description.trim() || undefined,
+    indexSettings: {
+      number_of_shards: tplModal.shards,
+      number_of_replicas: tplModal.replicas
+    },
     createdAt: new Date().toISOString(),
     fields: JSON.parse(JSON.stringify(fields.value))
   }
   await window.api.templates.save(serialize(tpl))
   await loadTemplates()
-  emit('snack', '模板已保存', 'success')
+  tplModal.open = false
+  message.success('模板已保存')
 }
 
 async function applyTemplate(id: string): Promise<void> {
   const tpl = templates.value.find((t) => t.id === id)
   if (!tpl) return
   fields.value = JSON.parse(JSON.stringify(tpl.fields))
-  emit('snack', `已应用模板「${tpl.name}」`)
+  allFieldsSnapshot.value = JSON.parse(JSON.stringify(tpl.fields))
+  if (tpl.indexSettings?.number_of_shards != null)
+    settings.defaultShards = tpl.indexSettings.number_of_shards
+  if (tpl.indexSettings?.number_of_replicas != null)
+    settings.defaultReplicas = tpl.indexSettings.number_of_replicas
+  gridVersion.value++
+  message.success(`已应用模板「${tpl.name}」`)
   await schedulePreview()
 }
 
-async function removeTemplate(id: string): Promise<void> {
-  await window.api.templates.remove(id)
-  await loadTemplates()
+function removeTemplate(id: string): void {
+  const tpl = templates.value.find((t) => t.id === id)
+  confirmDanger(`删除模板「${tpl?.name ?? ''}」？`, async () => {
+    await window.api.templates.remove(id)
+    await loadTemplates()
+    message.success('已删除')
+  })
 }
 
 async function applySettingDefaults(): Promise<void> {
   Object.assign(settings, await window.api.settings.get())
-  emit('snack', '已加载全局默认映射规则')
+  message.success('已加载全局默认映射规则')
   await regenerate()
 }
 
@@ -445,7 +479,6 @@ async function applySettingDefaults(): Promise<void> {
 async function parseDdl(): Promise<void> {
   if (!ddlText.value.trim()) return
   try {
-    // 只保留现有的自定义字段（imported 字段随 DDL 解析结果替换）
     const customSnapshots = allFieldsSnapshot.value.filter((f) => isCustomField(f.column))
     const customMap = new Map(
       fields.value.filter((f) => isCustomField(f.column)).map((f) => [f.column, f])
@@ -466,6 +499,7 @@ async function parseDdl(): Promise<void> {
     })
     fields.value = [...generatedFields, ...mergedCustom]
     allFieldsSnapshot.value = [...JSON.parse(JSON.stringify(generatedFields)), ...customSnapshots]
+    gridVersion.value++
     parseInfo.value = `已解析 ${m.table} · ${m.columns.length} 列`
     await schedulePreview()
   } catch (e) {
@@ -474,18 +508,15 @@ async function parseDdl(): Promise<void> {
 }
 
 // ---------- 导入 Mapping JSON ----------
-const IMPORTED_FIELD_BADGE = '导入'
-
 async function importMappingFile(): Promise<void> {
   try {
     const result = await window.api.es.importMapping()
     if (!result) return
     const parsedFields = await window.api.mapping.parseDocument(serialize(result.doc))
     if (!parsedFields || parsedFields.length === 0) {
-      emit('snack', '未在 JSON 中找到有效的 Mapping 字段', 'error')
+      message.error('未在 JSON 中找到有效的 Mapping 字段')
       return
     }
-    // 如果导入的 JSON 带有 settings.number_of_shards / replicas，则提示
     const anyDoc = result.doc as {
       settings?: { number_of_shards?: number; number_of_replicas?: number }
     }
@@ -496,7 +527,6 @@ async function importMappingFile(): Promise<void> {
       settings.defaultReplicas = anyDoc.settings.number_of_replicas
     }
 
-    // 保留 DB 字段 + 自定义字段，旧的 imported 字段替换为新导入的
     const dbSnapshots = allFieldsSnapshot.value.filter(
       (f) => !isCustomField(f.column) && !isImportedField(f.column)
     )
@@ -518,7 +548,6 @@ async function importMappingFile(): Promise<void> {
       return cur ? cur : JSON.parse(JSON.stringify(snap))
     })
 
-    // DB 字段优先使用 meta 的主键信息；如果 meta 原本就是 imported 生成的虚拟 meta，则重建
     const prevMeta = meta.value
     const pathParts = result.path.split(/[\\/]/)
     const fileName = pathParts.pop() || 'imported'
@@ -537,7 +566,6 @@ async function importMappingFile(): Promise<void> {
       comment: f.comment ?? null
     }))
     if (!prevMeta || prevMeta.database === 'imported') {
-      // 替换成新的虚拟 meta
       meta.value = {
         database: 'imported',
         table: baseName,
@@ -551,7 +579,6 @@ async function importMappingFile(): Promise<void> {
       fields.value = [...parsedFields, ...mergedCustom]
       allFieldsSnapshot.value = [...JSON.parse(JSON.stringify(parsedFields)), ...customSnapshots]
     } else {
-      // 保留原 DB 字段 + 合并 DB 字段列信息
       meta.value = {
         ...prevMeta,
         columns: [...prevMeta.columns, ...importedColumns]
@@ -565,10 +592,11 @@ async function importMappingFile(): Promise<void> {
     }
 
     mode.value = 'ddl'
+    gridVersion.value++
     await schedulePreview()
-    emit('snack', `已导入 ${parsedFields.length} 个字段（${baseName}）`, 'success')
+    message.success(`已导入 ${parsedFields.length} 个字段（${baseName}）`)
   } catch (e) {
-    emit('snack', `导入失败：${(e as Error).message}`, 'error')
+    message.error(`导入失败：${(e as Error).message}`)
   }
 }
 
@@ -591,572 +619,576 @@ function switchDdlMode(): void {
 }
 
 function fieldTypeChanged(f: MappingField): void {
-  if (f.esType === 'scaled_float') {
-    f.scalingFactor = f.scalingFactor || 100
-  }
+  if (f.esType === 'scaled_float') f.scalingFactor = f.scalingFactor || 100
   if (f.esType !== 'date') f.format = undefined
   if (f.esType !== 'text') {
     f.analyzer = 'standard'
     f.analyzed = false
     f.addKeyword = false
   }
+  void schedulePreview()
 }
 
 function analyzerChanged(f: MappingField): void {
-  // 选择了非 standard 分词器时，自动开启 analyzed（分词模式）
   if (f.analyzer && f.analyzer !== 'standard') {
     f.analyzed = true
   } else {
     f.analyzed = false
   }
+  void schedulePreview()
 }
 
 function short(df: string): string {
   return df.length > 40 ? df.slice(0, 40) + '…' : df
 }
+
+function renderFOf(row: MappingField): MappingField | null {
+  if (isCustomField(row.column)) return row
+  return fields.value.find((x) => x.column === row.column) || null
+}
+
+function rowCls(row: MappingField): string {
+  if (!isIncluded(row.column)) return 'row-excluded'
+  if (isCustomField(row.column)) return 'row-custom'
+  if (isImportedField(row.column)) return 'row-imported'
+  return ''
+}
+
+const typeOptions = ES_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))
+const analyzerOptions = ANALYZER_OPTIONS.map((a) => ({ label: a, value: a }))
+const dateFormatOptions = DATE_FORMAT_OPTIONS.map((df) => ({ label: short(df), value: df }))
+
+// ---- 数据表列定义 ----
+const columns = computed(() => [
+  {
+    title: '',
+    key: 'sel',
+    width: 46,
+    render: (row: MappingField) => {
+      if (isCustomField(row.column)) return h('span')
+      return h(NCheckbox, {
+        checked: isIncluded(row.column),
+        onUpdateChecked: () => toggleInclude(row.column)
+      })
+    }
+  },
+  {
+    title: '原库字段',
+    key: 'column',
+    width: 170,
+    render: (row: MappingField) => {
+      if (isCustomField(row.column)) {
+        return h(
+          NSpace,
+          { size: 6, align: 'center' },
+          {
+            default: () => [
+              h(
+                NTag,
+                { size: 'small', type: 'success', bordered: false },
+                { default: () => '自定义' }
+              ),
+              h('b', {}, row.field)
+            ]
+          }
+        )
+      }
+      const pk = meta.value?.columns.find((c) => c.name === row.column)?.primaryKey
+      return h(
+        NSpace,
+        { size: 6, align: 'center' },
+        {
+          default: () => [
+            isImportedField(row.column)
+              ? h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => '导入' })
+              : pk
+                ? h(
+                    NTag,
+                    { size: 'small', type: 'error', bordered: false },
+                    { default: () => 'PK' }
+                  )
+                : null,
+            h('b', {}, isImportedField(row.column) ? row.field : row.column)
+          ]
+        }
+      )
+    }
+  },
+  {
+    title: '原类型',
+    key: 'raw',
+    width: 110,
+    render: (row: MappingField) => {
+      if (isCustomField(row.column)) return h('span', { class: 'muted' }, '—')
+      if (isImportedField(row.column))
+        return h('span', { class: 'mono', style: 'opacity:.7' }, row.esType)
+      return h(
+        'span',
+        { class: 'mono', style: 'opacity:.7' },
+        meta.value?.columns.find((c) => c.name === row.column)?.rawType || '-'
+      )
+    }
+  },
+  {
+    title: 'ES 类型',
+    key: 'esType',
+    width: 130,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      return h(NSelect, {
+        size: 'small',
+        value: f.esType,
+        options: typeOptions,
+        onUpdateValue: (v: string) => {
+          f.esType = v
+          fieldTypeChanged(f)
+        }
+      })
+    }
+  },
+  {
+    title: 'ES 字段名',
+    key: 'field',
+    width: 150,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      return h(NInput, { size: 'small', value: f.field, onUpdateValue: (v) => (f.field = v) })
+    }
+  },
+  {
+    title: 'keyword 子字段',
+    key: 'addKeyword',
+    width: 90,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      return h(NSwitch, {
+        size: 'small',
+        value: f.addKeyword,
+        disabled: f.esType !== 'text',
+        onUpdateValue: (v: boolean) => {
+          f.addKeyword = v
+          void schedulePreview()
+        }
+      })
+    }
+  },
+  {
+    title: '索引',
+    key: 'indexable',
+    width: 68,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      return h(NSwitch, {
+        size: 'small',
+        value: f.indexable,
+        onUpdateValue: (v: boolean) => {
+          f.indexable = v
+          void schedulePreview()
+        }
+      })
+    }
+  },
+  {
+    title: '分词器',
+    key: 'analyzer',
+    width: 130,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      return h(NSelect, {
+        size: 'small',
+        value: f.analyzer,
+        options: analyzerOptions,
+        disabled: f.esType !== 'text',
+        onUpdateValue: (v: string) => {
+          f.analyzer = v
+          analyzerChanged(f)
+        }
+      })
+    }
+  },
+  {
+    title: '额外配置',
+    key: 'extra',
+    width: 170,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      if (f.esType === 'scaled_float') {
+        return h(NInputNumber, {
+          size: 'small',
+          value: f.scalingFactor ?? 100,
+          min: 1,
+          onUpdateValue: (v) => (f.scalingFactor = v ?? 100)
+        })
+      }
+      if (f.esType === 'date') {
+        return h(NSelect, {
+          size: 'small',
+          value: f.format,
+          options: dateFormatOptions,
+          placeholder: '选择格式',
+          onUpdateValue: (v) => (f.format = v)
+        })
+      }
+      return h('span', { class: 'muted' }, '—')
+    }
+  },
+  {
+    title: '备注',
+    key: 'comment',
+    width: 170,
+    render: (row: MappingField) => {
+      const f = renderFOf(row)
+      if (!f) return h('span', { class: 'muted' }, '—')
+      return h(NInput, {
+        size: 'small',
+        value: f.comment ?? '',
+        onUpdateValue: (v) => (f.comment = v)
+      })
+    }
+  },
+  {
+    title: '',
+    key: 'ops',
+    width: 90,
+    render: (row: MappingField) => {
+      if (!isCustomField(row.column) && !isImportedField(row.column)) {
+        const f = renderFOf(row)
+        if (!f) return h('span')
+        return h(
+          NButton,
+          { size: 'tiny', quaternary: true, onClick: () => resetRow(f) },
+          { default: () => '重置' }
+        )
+      }
+      const f = renderFOf(row) || row
+      return h(
+        NSpace,
+        { size: 4 },
+        {
+          default: () => [
+            h(
+              NButton,
+              { size: 'tiny', quaternary: true, onClick: () => removeCustomField(row.column) },
+              { default: () => '删除' }
+            ),
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                quaternary: true,
+                onClick: () =>
+                  isCustomField(row.column) ? resetCustomField(f) : resetImportedField(f)
+              },
+              { default: () => '重置' }
+            )
+          ]
+        }
+      )
+    }
+  }
+])
 </script>
 
 <template>
   <div class="page">
     <header class="page-head">
-      <h1>Mapping 编辑器</h1>
-      <div class="head-tools">
-        <div v-if="meta && mode === 'table'" class="meta-chip">
-          表：{{ meta.database }}.{{ meta.table }}
-          <span class="muted">
-            · {{ meta.columns.length }} 列 · 主键 {{ meta.primaryKey || '无' }}
-          </span>
-        </div>
-        <button class="btn ghost" :class="{ active: mode === 'table' }" @click="switchTableMode">
-          数据库表
-        </button>
-        <button class="btn ghost" :class="{ active: mode === 'ddl' }" @click="switchDdlMode">
-          DDL 离线
-        </button>
+      <div>
+        <h1 class="page-title">Mapping 编辑器</h1>
+        <p class="page-sub">
+          <template v-if="meta && mode === 'table'">
+            表：{{ meta.database }}.{{ meta.table }} · {{ meta.columns.length }} 列 · 主键
+            {{ meta.primaryKey || '无' }}
+          </template>
+          <template v-else>自动类型映射 · 可视化编辑 · 一键建索引</template>
+        </p>
       </div>
+      <n-space>
+        <n-button
+          :type="mode === 'table' ? 'primary' : 'default'"
+          size="small"
+          @click="switchTableMode"
+        >
+          数据库表
+        </n-button>
+        <n-button
+          :type="mode === 'ddl' ? 'primary' : 'default'"
+          size="small"
+          @click="switchDdlMode"
+        >
+          DDL 离线
+        </n-button>
+      </n-space>
     </header>
 
-    <!-- DDL offline panel -->
-    <section v-if="mode === 'ddl' && !meta" class="panel ddl-panel">
-      <div class="panel-head">
-        <h2>粘贴 CREATE TABLE，离线生成 Mapping</h2>
-      </div>
-      <textarea
-        v-model="ddlText"
-        class="ddl-text"
-        placeholder="CREATE TABLE `user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64) COMMENT '姓名',\n  ...\n) ENGINE=InnoDB COMMENT='用户表';"
-      >
-      </textarea>
-      <div class="row-end">
-        <span class="muted">{{ parseInfo }}</span>
-        <button class="btn primary" @click="parseDdl">解析并生成</button>
-      </div>
-    </section>
-
-    <section v-if="mode === 'table' && !props.tableContext && !meta" class="panel ddl-panel">
-      <div class="empty2">
-        <p>请到「数据源」中点击某个表的「表结构」，或使用 DDL 离线模式。</p>
-        <button class="btn ghost" @click="switchDdlMode">去 DDL 离线生成</button>
-      </div>
-    </section>
-
-    <template v-if="meta">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>
-            字段映射
-            <span class="muted small">规则已按默认规范自动生成，可逐行修改或重置</span>
-          </h2>
-          <div>
-            <button class="btn" @click="importMappingFile">导入 JSON</button>
-            <button class="btn primary" @click="addCustomField">新增自定义字段</button>
-            <button class="btn" @click="regenerate">按规则重置</button>
-            <button class="btn" @click="applySettingDefaults">载入全局规则</button>
-            <button class="btn" @click="openPreview">预览 JSON</button>
-          </div>
+    <n-spin :show="loading">
+      <!-- DDL offline panel -->
+      <n-card v-if="mode === 'ddl' && !meta" class="panel-card">
+        <template #header>粘贴 CREATE TABLE，离线生成 Mapping</template>
+        <n-input
+          v-model:value="ddlText"
+          type="textarea"
+          :autosize="{ minRows: 8, maxRows: 16 }"
+          placeholder="CREATE TABLE `user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64) COMMENT '姓名',\n  ...\n) ENGINE=InnoDB COMMENT='用户表';"
+          class="mono-input"
+        />
+        <div class="row-end">
+          <span class="muted">{{ parseInfo }}</span>
+          <n-button type="primary" @click="parseDdl">解析并生成</n-button>
         </div>
+      </n-card>
 
-        <div class="tbl-wrap">
-          <table class="grid">
-            <thead>
-              <tr>
-                <th class="col-sel">
-                  <input type="checkbox" :checked="allIncluded" @change="toggleIncludeAll" />
-                </th>
-                <th class="col-col">原库字段</th>
-                <th class="col-raw">原类型</th>
-                <th class="col-es">ES 类型</th>
-                <th class="col-fld">ES 字段名</th>
-                <th class="col-sub">keyword 子字段</th>
-                <th class="col-idx">索引</th>
-                <th class="col-an">分词器</th>
-                <th class="col-cfg">额外配置</th>
-                <th class="col-cmt">备注</th>
-                <th class="col-rst"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="snap in allFieldsSnapshot"
-                :key="snap.column"
-                :class="{
-                  'row-excluded': !isIncluded(snap.column),
-                  'custom-row': isCustomField(snap.column),
-                  'imported-row': isImportedField(snap.column)
-                }"
+      <n-card v-if="mode === 'table' && !props.tableContext && !meta" class="panel-card">
+        <n-empty description="请到「数据源」点击某张表的「表结构」，或使用 DDL 离线模式">
+          <template #extra>
+            <n-button size="small" @click="switchDdlMode">去 DDL 离线生成</n-button>
+          </template>
+        </n-empty>
+      </n-card>
+
+      <template v-if="meta">
+        <n-card class="panel-card">
+          <template #header>
+            <div class="card-hd">
+              <span>字段映射</span>
+              <n-space size="6">
+                <n-button size="small" @click="importMappingFile">导入 JSON</n-button>
+                <n-button size="small" type="primary" @click="addCustomField"
+                  >新增自定义字段</n-button
+                >
+                <n-button size="small" @click="regenerate">按规则重置</n-button>
+                <n-button size="small" @click="applySettingDefaults">载入全局规则</n-button>
+                <n-button size="small" @click="openPreview">预览 JSON</n-button>
+              </n-space>
+            </div>
+          </template>
+
+          <div class="pick-tip">
+            <n-space size="16" align="center">
+              <n-checkbox :checked="allIncluded" @update:checked="toggleIncludeAll"
+                >全选 / 全不选</n-checkbox
               >
-                <td class="col-sel">
-                  <input
-                    v-if="!isCustomField(snap.column)"
-                    type="checkbox"
-                    :checked="isIncluded(snap.column)"
-                    @change="toggleInclude(snap.column)"
-                  />
-                  <span v-else class="custom-check-placeholder"></span>
-                </td>
-                <template v-if="isIncluded(snap.column) || isCustomField(snap.column)">
-                  <td class="col-col">
-                    <template v-if="isCustomField(snap.column)">
-                      <span class="custom-badge">自定义</span>
-                    </template>
-                    <template v-else-if="isImportedField(snap.column)">
-                      <span class="imported-badge">导入</span>
-                      <b>{{ snap.field }}</b>
-                    </template>
-                    <template v-else>
-                      <span
-                        v-if="meta.columns.find((c) => c.name === snap.column)?.primaryKey"
-                        class="pk-badge"
-                        >PK</span
-                      >
-                      <b>{{ snap.column }}</b>
-                    </template>
-                  </td>
-                  <td class="mono raw">
-                    <template v-if="isCustomField(snap.column) || isImportedField(snap.column)">
-                      <span class="muted">{{
-                        isImportedField(snap.column) ? snap.esType : '—'
-                      }}</span>
-                    </template>
-                    <template v-else>
-                      {{ meta.columns.find((c) => c.name === snap.column)?.rawType || '-' }}
-                    </template>
-                  </td>
-                  <template
-                    v-for="renderF in [fields.find((x) => x.column === snap.column)!]"
-                    :key="renderF.column"
-                  >
-                    <td>
-                      <select
-                        v-model="renderF.esType"
-                        class="es-type"
-                        @change="fieldTypeChanged(renderF)"
-                      >
-                        <option v-for="t in ES_TYPE_OPTIONS" :key="t" :value="t">{{ t }}</option>
-                      </select>
-                    </td>
-                    <td><input v-model="renderF.field" class="fld" type="text" /></td>
-                    <td>
-                      <input
-                        v-model="renderF.addKeyword"
-                        type="checkbox"
-                        :disabled="renderF.esType !== 'text'"
-                      />
-                    </td>
-                    <td><input v-model="renderF.indexable" type="checkbox" /></td>
-                    <td>
-                      <select
-                        v-model="renderF.analyzer"
-                        :disabled="renderF.esType !== 'text'"
-                        @change="analyzerChanged(renderF)"
-                      >
-                        <option v-for="a in ANALYZER_OPTIONS" :key="a" :value="a">{{ a }}</option>
-                      </select>
-                    </td>
-                    <td>
-                      <template v-if="renderF.esType === 'scaled_float'">
-                        <span class="mini-label">scaling</span>
-                        <input v-model.number="renderF.scalingFactor" class="mini" type="number" />
-                      </template>
-                      <template v-else-if="renderF.esType === 'date'">
-                        <select v-model="renderF.format" class="mini-date">
-                          <option v-for="df in DATE_FORMAT_OPTIONS" :key="df" :value="df">
-                            {{ short(df) }}
-                          </option>
-                        </select>
-                      </template>
-                      <template v-else>
-                        <span class="muted">—</span>
-                      </template>
-                    </td>
-                    <td><input v-model="renderF.comment" class="cmt" type="text" /></td>
-                    <td class="col-rst">
-                      <template v-if="isCustomField(snap.column) || isImportedField(snap.column)">
-                        <button
-                          class="btn mini-btn danger-ghost"
-                          @click="removeCustomField(snap.column)"
-                        >
-                          删除
-                        </button>
-                        <button
-                          class="btn mini-btn"
-                          @click="
-                            isCustomField(snap.column)
-                              ? resetCustomField(renderF)
-                              : resetImportedField(renderF)
-                          "
-                        >
-                          重置
-                        </button>
-                      </template>
-                      <template v-else>
-                        <button class="btn mini-btn" @click="resetRow(renderF)">重置</button>
-                      </template>
-                    </td>
-                  </template>
-                </template>
-                <template v-else>
-                  <td class="col-col">
-                    <template v-if="isImportedField(snap.column)">
-                      <span class="imported-badge">导入</span>
-                      <span class="excl-col">{{ snap.field }}</span>
-                    </template>
-                    <template v-else>
-                      <span
-                        v-if="meta.columns.find((c) => c.name === snap.column)?.primaryKey"
-                        class="pk-badge"
-                        >PK</span
-                      >
-                      <span class="excl-col">{{ snap.column }}</span>
-                    </template>
-                  </td>
-                  <td class="mono raw excl">
-                    <template v-if="isImportedField(snap.column)">
-                      {{ snap.esType }}
-                    </template>
-                    <template v-else>
-                      {{ meta.columns.find((c) => c.name === snap.column)?.rawType || '-' }}
-                    </template>
-                  </td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                  <td><span class="muted">—</span></td>
-                </template>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="muted pick-tip-inline">
-          共
-          {{
-            allFieldsSnapshot.filter((f) => !isCustomField(f.column) && !isImportedField(f.column))
-              .length
-          }}
-          个库字段 +
-          {{ allFieldsSnapshot.filter((f) => isImportedField(f.column)).length }} 个导入字段 +
-          {{ allFieldsSnapshot.filter((f) => isCustomField(f.column)).length }} 个自定义字段。
-          取消最左列勾选后，该库字段<strong>不会加入 Mapping，也不会同步到 ES</strong>。
-          当前包含：<b>{{ fields.length }}</b> 个字段
-        </div>
-        <div v-if="issues.length" class="issues">
-          <div
+              <span class="muted">
+                共
+                {{
+                  allFieldsSnapshot.filter(
+                    (f) => !isCustomField(f.column) && !isImportedField(f.column)
+                  ).length
+                }}
+                个库字段 +
+                {{ allFieldsSnapshot.filter((f) => isImportedField(f.column)).length }} 个导入字段 +
+                {{ allFieldsSnapshot.filter((f) => isCustomField(f.column)).length }}
+                个自定义字段；当前包含 <b>{{ fields.length }}</b> 个
+              </span>
+            </n-space>
+          </div>
+
+          <n-data-table
+            :columns="columns"
+            :data="tableRows"
+            size="small"
+            :bordered="false"
+            :row-class-name="rowCls"
+            :scroll-x="1220"
+            :min-height="120"
+          />
+
+          <n-alert
             v-for="(it, idx) in issues"
             :key="idx"
-            class="issue"
-            :class="it.level === 'error' ? 'issue-err' : 'issue-warn'"
+            class="issue-alert"
+            :type="it.level === 'error' ? 'error' : 'warning'"
+            :show-icon="false"
           >
-            <b>{{ it.level === 'error' ? '✕' : '⚠' }}</b>
-            <span class="mono">{{ it.field }}</span> · {{ it.message }}
-          </div>
-        </div>
-      </section>
+            <template #default>
+              <b class="mono">{{ it.field }}</b> · {{ it.message }}
+            </template>
+          </n-alert>
+        </n-card>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>ES 索引操作</h2>
+        <n-card class="panel-card">
+          <template #header>ES 索引操作</template>
           <div class="es-ops">
-            <select v-model="esSourceId" class="es-sel">
-              <option value="" disabled>选择 ES 数据源</option>
-              <option v-for="s in esSources" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
-            <input v-model="indexName" class="fld idx" type="text" placeholder="索引名称" />
-            <button class="btn" :disabled="checkingIndex" @click="checkExists">
-              {{ checkingIndex ? '检查中…' : '校验存在' }}
-            </button>
-            <button class="btn" @click="createIndex">创建/重建索引</button>
-            <button class="btn" @click="updateMapping">推送 Mapping</button>
-            <button class="btn" @click="exportJson">导出 JSON</button>
+            <n-select
+              v-model:value="esSourceId"
+              size="small"
+              style="min-width: 180px"
+              placeholder="选择 ES 数据源"
+              :options="esSources.map((s) => ({ label: s.name, value: s.id }))"
+            />
+            <n-input
+              v-model:value="indexName"
+              size="small"
+              style="width: 200px"
+              placeholder="索引名称"
+            />
+            <n-button size="small" :loading="checkingIndex" @click="checkExists">校验存在</n-button>
+            <n-button size="small" type="primary" @click="createIndex">创建/重建索引</n-button>
+            <n-button size="small" @click="updateMapping">推送 Mapping</n-button>
+            <n-button size="small" @click="exportJson">导出 JSON</n-button>
           </div>
-        </div>
-        <div class="muted">防覆盖保护：创建前自动校验，索引已存在时需二次确认。</div>
-        <div class="es-badges">
-          <span v-if="esCfg" class="badge badge-es"
-            >目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }})</span
-          >
-          <span v-if="indexName" :class="indexExists ? 'badge badge-ok' : 'badge badge-muted'">
-            {{ indexExists ? '索引已存在' : '索引不存在' }}
-          </span>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>映射模板</h2>
-          <button class="btn" @click="saveTemplate">保存当前为模板</button>
-        </div>
-        <div v-if="templates.length === 0" class="muted">暂无模板，保存常用字段映射以复用</div>
-        <div v-else class="tpl-list">
-          <div v-for="t in templates" :key="t.id" class="tpl-item">
-            <span class="tpl-name">{{ t.name }}</span>
-            <span class="muted"
-              >{{ t.fields.length }} 字段 · {{ new Date(t.createdAt).toLocaleDateString() }}</span
+          <div class="muted small-block">防覆盖保护：创建前自动校验，索引已存在时需二次确认。</div>
+          <n-space size="8" class="es-badges">
+            <n-tag v-if="esCfg" size="small" type="warning" bordered>
+              目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }}) · ES {{ esCfg.version }}
+            </n-tag>
+            <n-tag
+              v-if="indexName"
+              size="small"
+              :type="indexExists ? 'success' : 'default'"
+              bordered
             >
-            <span class="tpl-ops">
-              <button class="btn ghost" @click="applyTemplate(t.id)">应用</button>
-              <button class="btn danger-ghost" @click="removeTemplate(t.id)">删除</button>
-            </span>
-          </div>
-        </div>
-      </section>
-    </template>
+              {{ indexExists ? '索引已存在' : '索引不存在' }}
+            </n-tag>
+          </n-space>
+        </n-card>
 
-    <div v-if="previewOpen" class="modal-mask" @click.self="previewOpen = false">
-      <div class="modal wide">
-        <div class="modal-head">
-          <h3>Mapping JSON 预览</h3>
-          <button class="btn ghost" @click="previewOpen = false">✕</button>
-        </div>
-        <div class="modal-body">
-          <pre class="json-pre">{{ previewText || '生成中…' }}</pre>
-        </div>
+        <n-card class="panel-card">
+          <template #header>
+            <div class="card-hd">
+              <span>映射模板</span>
+              <n-button size="small" type="primary" ghost @click="openSaveTemplate"
+                >保存当前为模板</n-button
+              >
+            </div>
+          </template>
+          <n-empty
+            v-if="templates.length === 0"
+            description="暂无模板，保存常用字段映射以复用"
+            style="padding: 14px 0"
+          />
+          <n-space v-else vertical :size="8">
+            <n-space v-for="t in templates" :key="t.id" align="center" class="tpl-item">
+              <b class="tpl-name">{{ t.name }}</b>
+              <span class="muted">
+                {{ t.fields.length }} 字段 · {{ new Date(t.createdAt).toLocaleDateString() }}
+                <template v-if="t.indexSettings">
+                  · {{ t.indexSettings.number_of_shards ?? '?' }}sh/
+                  {{ t.indexSettings.number_of_replicas ?? '?' }}rep</template
+                >
+              </span>
+              <template v-if="t.description">
+                <n-tag size="small" type="info" bordered class="tpl-desc">{{
+                  t.description
+                }}</n-tag>
+              </template>
+              <span class="tpl-ops">
+                <n-button size="tiny" type="primary" ghost @click="applyTemplate(t.id)"
+                  >应用</n-button
+                >
+                <n-button size="tiny" type="error" ghost @click="removeTemplate(t.id)"
+                  >删除</n-button
+                >
+              </span>
+            </n-space>
+          </n-space>
+        </n-card>
+      </template>
+    </n-spin>
+
+    <!-- Mapping JSON 预览 -->
+    <n-modal
+      v-model:show="previewOpen"
+      preset="card"
+      title="Mapping JSON 预览"
+      style="width: 760px; max-width: 92vw"
+    >
+      <pre class="json-pre">{{ previewText || '生成中…' }}</pre>
+      <template #footer>
         <div class="modal-foot">
-          <button class="btn" @click="exportJson">导出 JSON</button>
-          <button class="btn primary" @click="previewOpen = false">关闭</button>
+          <n-button @click="exportJson">导出 JSON</n-button>
+          <n-button type="primary" @click="previewOpen = false">关闭</n-button>
         </div>
-      </div>
-    </div>
+      </template>
+    </n-modal>
+
+    <!-- 保存模板 -->
+    <n-modal
+      v-model:show="tplModal.open"
+      preset="card"
+      title="保存为模板"
+      style="width: 440px; max-width: 92vw"
+    >
+      <n-form label-placement="top">
+        <n-form-item label="模板名称"
+          ><n-input v-model:value="tplModal.name" placeholder="如：订单表高级模板"
+        /></n-form-item>
+        <n-form-item label="描述（业务特殊字段说明）"
+          ><n-input
+            v-model:value="tplModal.description"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+        /></n-form-item>
+        <n-form-item label="索引默认分片 / 副本（应用模板时生效）">
+          <n-space size="8">
+            <n-input-number
+              v-model:value="tplModal.shards"
+              :min="1"
+              :max="32"
+              style="width: 120px"
+            />
+            <n-input-number
+              v-model:value="tplModal.replicas"
+              :min="0"
+              :max="4"
+              style="width: 120px"
+            />
+          </n-space>
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <div class="modal-foot">
+          <n-button @click="tplModal.open = false">取消</n-button>
+          <n-button type="primary" @click="saveTemplate">保存</n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <style scoped>
 .page {
-  max-width: 1240px;
+  max-width: 1280px;
 }
 
-.page-head {
+.panel-card {
+  margin-bottom: 16px;
+}
+
+.card-hd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
-}
-
-.page-head h1 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.head-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.meta-chip {
-  font-size: 13px;
-  color: var(--es-text-2);
-  padding: 6px 12px;
-  background: #eef2ff;
-  border-radius: 20px;
-}
-
-.panel {
-  background: var(--es-panel);
-  border: 1px solid var(--es-border);
-  border-radius: 12px;
-  padding: 16px 18px;
-  margin-bottom: 18px;
-}
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
+  gap: 12px;
   flex-wrap: wrap;
-  gap: 10px;
+  width: 100%;
 }
 
-.panel-head h2 {
-  margin: 0;
-  font-size: 15px;
+.row-end {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .muted {
-  color: var(--es-text-3);
-}
-
-.small {
   font-size: 12px;
-  font-weight: 400;
+  opacity: 0.55;
 }
 
-.btn {
-  padding: 6px 12px;
-  border: 1px solid var(--es-border);
-  background: #fff;
-  border-radius: 7px;
-  font-size: 12.5px;
-  cursor: pointer;
-  color: var(--es-text);
-}
-
-.btn + .btn {
-  margin-left: 6px;
-}
-
-.btn:hover {
-  border-color: #b9c1cd;
-}
-
-.btn.primary {
-  background: var(--es-primary);
-  border-color: var(--es-primary);
-  color: #fff;
-}
-
-.btn.ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--es-primary);
-}
-
-.btn.ghost.active {
-  background: #eef2ff;
-}
-
-.btn.danger-ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--es-danger);
-}
-
-.btn.mini-btn {
-  padding: 3px 8px;
-  font-size: 11.5px;
-}
-
-.tbl-wrap {
-  overflow: auto;
-}
-
-.grid {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-  min-width: 1050px;
-}
-
-.grid th,
-.grid td {
-  padding: 7px 8px;
-  border-bottom: 1px solid var(--es-border);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.grid th {
-  color: var(--es-text-3);
-  font-weight: 500;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.grid input,
-.grid select {
-  padding: 5px 7px;
-  border: 1px solid var(--es-border);
-  border-radius: 6px;
+.pick-tip {
+  margin-bottom: 10px;
   font-size: 12.5px;
 }
 
-.grid input[type='checkbox'] {
-  width: 15px;
-  height: 15px;
-}
-
-.col-col {
-  width: 130px;
-}
-
-.col-raw {
-  width: 110px;
-}
-
-.col-es {
-  width: 120px;
-}
-
-.col-fld {
-  width: 140px;
-}
-
-.col-sub {
-  width: 90px;
-}
-
-.col-idx {
-  width: 60px;
-}
-
-.col-an {
-  width: 120px;
-}
-
-.col-cfg {
-  width: 150px;
-}
-
-.col-cmt {
-  width: 180px;
-}
-
-.es-type,
-.fld {
-  width: 100%;
-}
-
-.mini {
-  width: 70px;
-}
-
-.mini-date {
-  width: 150px;
-}
-
-.cmt {
-  width: 100%;
-}
-
-.pk-badge {
-  background: #fee2e2;
-  color: #b91c1c;
-  border-radius: 4px;
-  font-size: 10px;
-  padding: 1px 4px;
-  margin-right: 5px;
-}
-
-.raw {
-  color: var(--es-text-3);
-}
-
-.mono {
-  font-family: ui-monospace, Menlo, monospace;
+.small-block {
+  margin-top: 10px;
 }
 
 .es-ops {
@@ -1166,141 +1198,36 @@ function short(df: string): string {
   flex-wrap: wrap;
 }
 
-.es-sel {
-  padding: 6px 8px;
-  border: 1px solid var(--es-border);
-  border-radius: 7px;
-  min-width: 150px;
-}
-
-.idx {
-  width: 180px;
-}
-
 .es-badges {
+  margin-top: 12px;
+}
+
+.issue-alert {
   margin-top: 10px;
-  display: flex;
-  gap: 8px;
-}
-
-.badge {
-  padding: 3px 10px;
-  border-radius: 20px;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.badge-es {
-  background: #fff7ed;
-  color: #c2410c;
-}
-
-.badge-ok {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.badge-muted {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-.tpl-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .tpl-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--es-border);
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.18);
   border-radius: 8px;
+  flex-wrap: wrap;
 }
 
 .tpl-name {
-  font-weight: 600;
   flex: 1;
+}
+
+.tpl-desc {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tpl-ops {
   display: flex;
   gap: 4px;
-}
-
-.ddl-panel .ddl-text {
-  width: 100%;
-  min-height: 200px;
-  border: 1px solid var(--es-border);
-  border-radius: 8px;
-  padding: 10px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 12.5px;
-  resize: vertical;
-}
-
-.row-end {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.empty2 {
-  text-align: center;
-  padding: 40px;
-  color: var(--es-text-3);
-}
-
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.modal {
-  width: 560px;
-  max-width: 92vw;
-  background: #fff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-}
-
-.modal.wide {
-  width: 760px;
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--es-border);
-}
-
-.modal-head h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.modal-body {
-  padding: 14px 18px;
-}
-
-.modal-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--es-border);
 }
 
 .json-pre {
@@ -1309,143 +1236,33 @@ function short(df: string): string {
   padding: 14px;
   border-radius: 8px;
   font-size: 12px;
-  max-height: 460px;
+  max-height: 60vh;
   overflow: auto;
   white-space: pre;
   font-family: ui-monospace, Menlo, monospace;
 }
 
-.mini-label {
-  font-size: 11px;
-  color: var(--es-text-3);
-  margin-right: 4px;
-}
-
-.issues {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.issue {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 7px;
-  font-size: 12.5px;
-}
-
-.issue b {
-  width: 16px;
-}
-
-.issue-err {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.issue-warn {
-  background: #fffbeb;
-  color: #a16207;
-}
-
-.modal-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pick-tip {
-  margin-bottom: 12px;
-  font-size: 12.5px;
-}
-
-.pick-tip code {
+.mono-input :deep(textarea) {
   font-family: ui-monospace, Menlo, monospace;
-  background: #f1f5f9;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 11.5px;
 }
 
-.pick-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px 14px;
-  max-height: 460px;
-  overflow: auto;
-  padding: 4px;
-}
-
-.pick-item {
+.modal-foot {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--es-border);
-  border-radius: 6px;
-  font-size: 12.5px;
-  cursor: pointer;
+  justify-content: flex-end;
+  gap: 8px;
+}
+</style>
+
+<style>
+.n-data-table-td.row-excluded {
+  opacity: 0.45;
 }
 
-.pick-item:hover {
-  background: #f8fafc;
+.n-data-table-tr.row-custom {
+  background: rgba(22, 163, 74, 0.07);
 }
 
-.pick-item input[type='checkbox'] {
-  width: 15px;
-  height: 15px;
-}
-
-.small {
-  font-size: 11.5px;
-}
-
-.custom-row {
-  background: #f0fdf4;
-}
-
-.custom-row:hover {
-  background: #dcfce7;
-}
-
-.imported-row {
-  background: #eff6ff;
-}
-
-.imported-row:hover {
-  background: #dbeafe;
-}
-
-.custom-badge {
-  background: #dcfce7;
-  color: #15803d;
-  border-radius: 4px;
-  font-size: 10px;
-  padding: 1px 4px;
-  margin-right: 5px;
-  font-weight: 600;
-}
-
-.imported-badge {
-  background: #dbeafe;
-  color: #1d4ed8;
-  border-radius: 4px;
-  font-size: 10px;
-  padding: 1px 4px;
-  margin-right: 5px;
-  font-weight: 600;
-}
-
-.custom-check-placeholder {
-  display: inline-block;
-  width: 15px;
-  height: 15px;
-}
-
-.row-excluded {
-  opacity: 0.5;
+.n-data-table-tr.row-imported {
+  background: rgba(37, 99, 235, 0.07);
 }
 </style>

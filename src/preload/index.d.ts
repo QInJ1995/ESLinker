@@ -1,5 +1,7 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type {
+  CompareRequest,
+  CompareResult,
   DataSourceItem,
   DbConfig,
   EsConfig,
@@ -63,6 +65,9 @@ export interface EsLinkerApi {
   log: {
     read: (taskId: string) => Promise<string>
     export: () => Promise<{ dir: string; files: string[] }>
+  }
+  compare: {
+    run: (req: CompareRequest) => Promise<CompareResult>
   }
 }
 

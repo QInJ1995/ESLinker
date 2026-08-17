@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
+  CompareRequest,
+  CompareResult,
   DataSourceItem,
   DbConfig,
   EsConfig,
@@ -86,6 +88,9 @@ const api: Api = {
   log: {
     read: (taskId: string): Promise<string> => ipcRenderer.invoke('log:read', taskId),
     export: (): Promise<{ dir: string; files: string[] }> => ipcRenderer.invoke('log:export')
+  },
+  compare: {
+    run: (req: CompareRequest): Promise<CompareResult> => ipcRenderer.invoke('compare:run', req)
   }
 }
 

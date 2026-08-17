@@ -1,6 +1,6 @@
 export type DbType = 'mysql' | 'postgres' | 'mssql'
 export type SourceKind = 'db' | 'es'
-export type EsVersion = '7' | '8'
+export type EsVersion = '6' | '7' | '8'
 export type SyncMode = 'full' | 'incremental' | 'full_then_incremental'
 export type SyncStatus = 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'finished'
 export type SyncPhase = 'idle' | 'full' | 'incremental' | 'done'
@@ -147,7 +147,45 @@ export interface MappingTemplate {
   id: string
   name: string
   createdAt: string
+  description?: string
+  indexSettings?: {
+    number_of_shards?: number
+    number_of_replicas?: number
+    refresh_interval?: string
+  }
   fields: MappingField[]
+}
+
+export interface CompareRequest {
+  db: DbConfig
+  database: string
+  table: string
+  primaryKey: string
+  es: EsConfig
+  esIndex: string
+  rowLimit: number
+}
+
+export interface CompareMismatch {
+  id: string
+  reason: string
+  db?: string
+  es?: string
+}
+
+export interface CompareResult {
+  dbCount: number
+  esCount: number
+  scanned: number
+  matched: number
+  mismatch: number
+  missingInEs: number
+  missingInEsSample: string[]
+  extraInEs: number
+  mismatchSample: CompareMismatch[]
+  errors: string[]
+  elapsedMs: number
+  limitReached: boolean
 }
 
 export interface Settings {
