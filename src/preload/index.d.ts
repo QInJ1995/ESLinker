@@ -29,6 +29,7 @@ export interface EsLinkerApi {
     document: (fields: MappingField[], settings: Settings) => Promise<unknown>
     parseDDL: (ddl: string) => Promise<TableMeta | null>
     validate: (fields: MappingField[]) => Promise<MappingIssue[]>
+    parseDocument: (doc: unknown) => Promise<MappingField[]>
   }
   templates: {
     list: () => Promise<MappingTemplate[]>
@@ -42,6 +43,7 @@ export interface EsLinkerApi {
     update: (cfg: EsConfig, index: string, properties: unknown) => Promise<boolean>
     remove: (cfg: EsConfig, index: string) => Promise<boolean>
     export: (doc: unknown, fileName: string) => Promise<string | null>
+    importMapping: () => Promise<{ doc: unknown; path: string } | null>
   }
   sync: {
     list: () => Promise<SyncTask[]>

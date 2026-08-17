@@ -410,6 +410,58 @@ export function parseDDL(ddl: string): TableMeta | null {
   }
 }
 
+/** Reverse an ES mapping document back into editable MappingField rows. */
+export function parseMappingDocument(doc: MappingDocument): MappingField[] {
+  const props = doc?.mappings?.properties as Record<string, unknown> | undefined
+  if (!props || typeof props !== 'object') return []
+  const fields: MappingField[] = []
+  const prefix = 'imported_'
+  for (const [fieldName, raw] of Object.entries(props)) {
+    const p = (raw ?? {}) as Record<string, unknown>
+    const esType = String(p.type ?? 'keyword')
+    let addKeyword = false
+    let ignoreAbove: number | undefined
+    const keywordFields = (p.fields as Record<string, unknown> | undefined)?.keyword as
+      | Record<string, unknown>
+      | undefined
+    if (keywordFields && String(keywordFields.type ?? '') === 'keyword') {
+      addKeyword = true
+      if (typeof keywordFields.ignore_above === 'number') {
+        ignoreAbove = keywordFields.ignore_above as number
+      } else if (typeof keywordFields.ignoreAbove === 'number') {
+        ignoreAbove = keywordFields.ignoreAbove as number
+      }
+    }
+    const analyzerProp = p.analyzer
+    const analyzer = typeof analyzerProp === 'string' ? analyzerProp : undefined
+    const analyzed = !!analyzer && analyzer !== 'standard'
+    const indexable = p.index !== false
+    let scalingFactor: number | undefined
+    if (esType === 'scaled_float') {
+      const sf = p.scaling_factor ?? p.scalingFactor
+      if (typeof sf === 'number') scalingFactor = sf
+    }
+    let format: string | undefined
+    if (esType === 'date' && typeof p.format === 'string') format = p.format
+    const meta = p.meta as Record<string, unknown> | undefined
+    const comment = typeof meta?.comment === 'string' ? meta.comment : undefined
+    fields.push({
+      column: prefix + fieldName + '_' + Math.random().toString(36).slice(2, 8),
+      field: fieldName,
+      esType,
+      addKeyword,
+      indexable,
+      analyzed,
+      analyzer: analyzer ?? 'standard',
+      ignoreAbove,
+      scalingFactor,
+      format,
+      comment
+    })
+  }
+  return fields
+}
+
 function splitTopLevel(body: string): string[] {
   const lines: string[] = []
   let depth = 0

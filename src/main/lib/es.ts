@@ -1,7 +1,7 @@
 import { Client } from '@elastic/elasticsearch'
 import { EsConfig, MappingDocument } from './types'
 import { dialog, BrowserWindow } from 'electron'
-import { writeFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 
 export function buildClient(cfg: EsConfig): Client {
   const protocol = cfg.secure ? 'https' : 'http'
@@ -166,4 +166,18 @@ export async function exportMappingJson(
   if (result.canceled || !result.filePath) return null
   writeFileSync(result.filePath, JSON.stringify(doc, null, 2), 'utf8')
   return result.filePath
+}
+
+export async function importMappingJson(): Promise<{ doc: MappingDocument; path: string } | null> {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+  const result = await dialog.showOpenDialog(win, {
+    title: '导入 Mapping JSON',
+    filters: [{ name: 'JSON', extensions: ['json', 'mapping.json'] }],
+    properties: ['openFile']
+  })
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) return null
+  const filePath = result.filePaths[0]
+  const raw = readFileSync(filePath, 'utf8')
+  const doc = JSON.parse(raw) as MappingDocument
+  return { doc, path: filePath }
 }

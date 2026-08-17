@@ -7,12 +7,14 @@ import {
   esCreateIndex,
   esUpdateMapping,
   esDeleteIndex,
-  exportMappingJson
+  exportMappingJson,
+  importMappingJson
 } from './es'
 import {
   generateMappingFields,
   buildMappingDocument,
   parseDDL,
+  parseMappingDocument,
   ruleOptionsFromSettings,
   validateMapping
 } from './mapping'
@@ -96,6 +98,8 @@ export function registerIpc(): void {
 
   ipcMain.handle('mapping:validate', (_e, fields: unknown[]) => validateMapping(fields as never[]))
 
+  ipcMain.handle('mapping:parseDocument', (_e, doc: unknown) => parseMappingDocument(doc as never))
+
   // ---------- Templates ----------
   ipcMain.handle('templates:list', () => appStore.listTemplates())
 
@@ -147,6 +151,10 @@ export function registerIpc(): void {
 
   ipcMain.handle('es:export', async (_e, doc: unknown, fileName: string) => {
     return exportMappingJson(doc as never, fileName)
+  })
+
+  ipcMain.handle('es:importMapping', async () => {
+    return importMappingJson()
   })
 
   // ---------- Sync ----------

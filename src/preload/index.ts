@@ -39,7 +39,9 @@ const api: Api = {
     parseDDL: (ddl: string): Promise<TableMeta | null> =>
       ipcRenderer.invoke('mapping:parseDDL', ddl),
     validate: (fields: MappingField[]): Promise<MappingIssue[]> =>
-      ipcRenderer.invoke('mapping:validate', fields)
+      ipcRenderer.invoke('mapping:validate', fields),
+    parseDocument: (doc: unknown): Promise<MappingField[]> =>
+      ipcRenderer.invoke('mapping:parseDocument', doc)
   },
   templates: {
     list: (): Promise<MappingTemplate[]> => ipcRenderer.invoke('templates:list'),
@@ -58,7 +60,9 @@ const api: Api = {
     remove: (cfg: EsConfig, index: string): Promise<boolean> =>
       ipcRenderer.invoke('es:delete', cfg, index),
     export: (doc: unknown, fileName: string): Promise<string | null> =>
-      ipcRenderer.invoke('es:export', doc, fileName)
+      ipcRenderer.invoke('es:export', doc, fileName),
+    importMapping: (): Promise<{ doc: unknown; path: string } | null> =>
+      ipcRenderer.invoke('es:importMapping')
   },
   sync: {
     list: (): Promise<SyncTask[]> => ipcRenderer.invoke('sync:list'),
