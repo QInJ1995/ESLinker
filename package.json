@@ -21,7 +21,7 @@
     "build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
-    "@elastic/elasticsearch": "^9.5.0",
+    "@elastic/elasticsearch": "^8.15.0",
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "electron-store": "^8.2.0",
