@@ -956,7 +956,7 @@ const columns = computed(() => [
           <template #header>
             <div class="card-hd">
               <span>字段映射</span>
-              <n-space size="6">
+              <n-space :size="6">
                 <n-button size="small" @click="importMappingFile">导入 JSON</n-button>
                 <n-button size="small" type="primary" @click="addCustomField"
                   >新增自定义字段</n-button
@@ -969,7 +969,7 @@ const columns = computed(() => [
           </template>
 
           <div class="pick-tip">
-            <n-space size="16" align="center">
+            <n-space :size="16" align="center">
               <n-checkbox :checked="allIncluded" @update:checked="toggleIncludeAll"
                 >全选 / 全不选</n-checkbox
               >
@@ -1033,7 +1033,7 @@ const columns = computed(() => [
             <n-button size="small" @click="exportJson">导出 JSON</n-button>
           </div>
           <div class="muted small-block">防覆盖保护：创建前自动校验，索引已存在时需二次确认。</div>
-          <n-space size="8" class="es-badges">
+          <n-space :size="8" class="es-badges">
             <n-tag v-if="esCfg" size="small" type="warning" bordered>
               目标：{{ esCfg.name }} ({{ esCfg.host }}:{{ esCfg.port }}) · ES {{ esCfg.version }}
             </n-tag>
@@ -1125,7 +1125,7 @@ const columns = computed(() => [
             :autosize="{ minRows: 2, maxRows: 4 }"
         /></n-form-item>
         <n-form-item label="索引默认分片 / 副本（应用模板时生效）">
-          <n-space size="8">
+          <n-space :size="8">
             <n-input-number
               v-model:value="tplModal.shards"
               :min="1"
