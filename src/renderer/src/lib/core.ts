@@ -1,3 +1,5 @@
+import { toRaw } from 'vue'
+
 export type {
   DataSourceItem,
   DbConfig,
@@ -64,4 +66,9 @@ export function uid(): string {
     const v = c === 'x' ? r : (r & 0x3) | 0x8
     return v.toString(16)
   })
+}
+
+export function serialize<T>(value: T): T {
+  if (value === null || value === undefined) return value
+  return JSON.parse(JSON.stringify(toRaw(value))) as T
 }

@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, toRaw } from 'vue'
+import { ref, onMounted } from 'vue'
+import { serialize } from '../lib/core'
 
 const emit = defineEmits<{ (e: 'go', view: string): void }>()
-
-function serialize<T>(value: T): T {
-  if (value === null || value === undefined) return value
-  return JSON.parse(JSON.stringify(toRaw(value))) as T
-}
 
 const stats = ref({ dbs: 0, es: 0, tasks: 0, running: 0 })
 const version = ref('')

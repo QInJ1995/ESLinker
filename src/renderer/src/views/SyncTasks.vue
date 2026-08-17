@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, toRaw } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import type { DbConfig, EsConfig, SyncTask } from '../lib/core'
-import { uid } from '../lib/core'
-
-function serialize<T>(value: T): T {
-  if (value === null || value === undefined) return value
-  return JSON.parse(JSON.stringify(toRaw(value))) as T
-}
+import { uid, serialize } from '../lib/core'
 
 const emit = defineEmits<{ (e: 'snack', text: string, type?: string): void }>()
 
@@ -317,10 +312,10 @@ function esName(id: string): string {
               <b>{{ t.name }}</b>
               <span :class="statusBadgeClass(t.status)">{{
                 t.status === 'paused' ? '已暂停' : t.status
-              }}</span>
+                }}</span>
               <span class="badge badge-mode">{{
                 t.mode === 'full' ? '全量' : t.mode === 'incremental' ? '增量' : '全量+增量'
-              }}</span>
+                }}</span>
             </div>
             <div class="task-route mono">
               {{ srcName(t.dbSourceId) }} → {{ t.database }}.{{ t.table }}

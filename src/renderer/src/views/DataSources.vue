@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, toRaw } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import type { DataSourceItem, DbConfig, EsConfig } from '../lib/core'
-import { DB_TYPE_LABELS, uid } from '../lib/core'
-
-function serialize<T>(value: T): T {
-  if (value === null || value === undefined) return value
-  return JSON.parse(JSON.stringify(toRaw(value))) as T
-}
+import { DB_TYPE_LABELS, uid, serialize } from '../lib/core'
 
 const emit = defineEmits<{
   (e: 'snack', text: string, type?: string): void

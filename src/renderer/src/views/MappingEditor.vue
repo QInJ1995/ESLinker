@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, toRaw } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import type {
   DbConfig,
   EsConfig,
@@ -13,13 +13,9 @@ import {
   ANALYZER_OPTIONS,
   DATE_FORMAT_OPTIONS,
   DEFAULT_SETTINGS,
-  uid
+  uid,
+  serialize
 } from '../lib/core'
-
-function serialize<T>(value: T): T {
-  if (value === null || value === undefined) return value
-  return JSON.parse(JSON.stringify(toRaw(value))) as T
-}
 
 const props = defineProps<{
   tableContext: { cfg: DbConfig; database: string; table: string } | null
